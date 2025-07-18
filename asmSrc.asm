@@ -278,7 +278,7 @@ asmMul1 proc
 	jz L_asmMul1_4		; for (r14 = _Size2 - _Size1; r14 != 0; r14 -= 1)
 	L_asmMul1_2:
 		mov rbx, r8		; rbx = _Src1
-		mov rdi, rcx		；for (rdi = _Size1; rdi != 0; rdi -= 1)
+		mov rdi, rcx		; for (rdi = _Size1; rdi != 0; rdi -= 1)
 		L_asmMul1_3:
 			mov rax, [rbx]
 			mul qword ptr [r9]
@@ -400,49 +400,49 @@ asmNtt proc
 	push rdi
 	push rsi
 	push rbx
-	mov rsi, rcx
-	mov rdi, rdx
-	mov r10, [rsp+48h]
-	L_asmNtt_0:
+	mov rsi, rcx		; rsi = N
+	mov rdi, rdx		; rdi = mod
+	mov r10, [rsp+48h]	; r10 = end
+	L_asmNtt_0:		; <optimization for root[0] == 1>
 		mov rbx, [r8+8*rsi]
 		mov rax, [r8]
 		lea rdx, [rbx+rax]
 		sub rax, rbx
 		lea rbx, [rax+rdi]
-		cmovs rax, rbx
+		cmovs rax, rbx		; rax = ([r8] - [r8 + N]) % mod
 		mov rbx, rdx
 		sub rdx, rdi
-		cmovs rdx, rbx
+		cmovs rdx, rbx		; rdx = ([r8] + [r8 + N]) % mod
 		mov [r8], rdx
 		mov [r8+8*rsi], rax
 		lea r8, [r8+8]
 		dec rcx
 		jnz L_asmNtt_0
-	L_asmNtt_1:
+	L_asmNtt_1:		; for (r8 = begin + 2 * N, r9 = root + 1; r8 < end; r8 += N, r9 += 2)
 		lea r8, [r8+8*rsi]
 		lea r9, [r9+16]
 		cmp r8, r10
 		jae L_asmNtt_3
 		mov rcx, rsi
-		mov r11, [r9]
-		mov r12, [r9+8]
-		L_asmNtt_2:
+		mov r11, [r9]		; r11 = root[]
+		mov r12, [r9+8]		; r12 = ceil(2^64 * root[] / mod)
+		L_asmNtt_2:		; for (rcx = N; rcx != 0; rcx -= 1, r8 += 1)
 			mov rax, [r8+8*rsi]
 			mov rbx, rax
-			mul r12
-			imul rbx, r11
+			mul r12			; rdx ~ [r8 + N] * root[] / mod
+			imul rbx, r11		; rbx = [r8 + N] * root[]
 			imul rdx, rdi
-			sub rbx, rdx
+			sub rbx, rdx		; rbx ~ [r8 + N] * root[] % mod
 			lea rax, [rbx+rdi]
-			cmovs rbx, rax
+			cmovs rbx, rax		; rbx = [r8 + N] * root[] % mod
 			mov rax, [r8]
 			lea rdx, [rbx+rax]
 			sub rax, rbx
 			lea rbx, [rax+rdi]
-			cmovs rax, rbx
+			cmovs rax, rbx		; rax = ([r8] - [r8 + N] * root[]) % mod
 			mov rbx, rdx
 			sub rdx, rdi
-			cmovs rdx, rbx
+			cmovs rdx, rbx		; rax = ([r8] + [r8 + N] * root[]) % mod
 			mov [r8], rdx
 			mov [r8+8*rsi], rax
 			lea r8, [r8+8]
