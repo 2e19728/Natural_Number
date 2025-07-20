@@ -319,28 +319,28 @@ asmNtt proc
 		mov rcx, rsi
 		mov r11, [r9]			; r11 = root[]
 		mov r12, [r9+8]			; r12 = ceil(2^64 * root[] / mod)
-	L_asmNtt_2:
-		mov rax, [r8+8*rsi]
-		mov rbx, rax
-		mul r12
-		imul rbx, r11
-		imul rdx, rdi
-		sub rbx, rdx
-		lea rax, [rbx+rdi]
-		cmovs rbx, rax			; rbx = [r8 + N] * root[] % mod
-		mov rax, [r8]
-		lea rdx, [rbx+rax]
-		sub rax, rbx
-		lea rbx, [rax+rdi]
-		cmovs rax, rbx			; rax = ([r8] - [r8 + N] * root[]) % mod
-		mov rbx, rdx
-		sub rdx, rdi
-		cmovs rdx, rbx			; rdx = ([r8] + [r8 + N] * root[]) % mod
-		mov [r8], rdx
-		mov [r8+8*rsi], rax
-		lea r8, [r8+8]
-		dec rcx
-		jnz L_asmNtt_2
+		L_asmNtt_2:
+			mov rax, [r8+8*rsi]
+			mov rbx, rax
+			mul r12
+			imul rbx, r11
+			imul rdx, rdi
+			sub rbx, rdx
+			lea rax, [rbx+rdi]
+			cmovs rbx, rax			; rbx = [r8 + N] * root[] % mod
+			mov rax, [r8]
+			lea rdx, [rbx+rax]
+			sub rax, rbx
+			lea rbx, [rax+rdi]
+			cmovs rax, rbx			; rax = ([r8] - [r8 + N] * root[]) % mod
+			mov rbx, rdx
+			sub rdx, rdi
+			cmovs rdx, rbx			; rdx = ([r8] + [r8 + N] * root[]) % mod
+			mov [r8], rdx
+			mov [r8+8*rsi], rax
+			lea r8, [r8+8]
+			dec rcx
+			jnz L_asmNtt_2
 		jmp L_asmNtt_1
 L_asmNtt_3:
 	pop rbx
@@ -358,36 +358,36 @@ asmNtt2 proc
 	mov rsi, rcx
 	mov rdi, rdx
 	mov r10, [rsp+48h]
-L_asmNtt2_0:
-	mov rcx, rsi
-	mov r11, [r9]
-	mov r12, [r9+8]
-L_asmNtt2_1:
-	mov rax, [r8+8*rsi]
-	mov rbx, rax
-	mul r12
-	imul rbx, r11
-	imul rdx, rdi
-	sub rbx, rdx
-	lea rax, [rbx+rdi]
-	cmovs rbx, rax
-	mov rax, [r8]
-	lea rdx, [rbx+rax]
-	sub rax, rbx
-	lea rbx, [rax+rdi]
-	cmovs rax, rbx
-	mov rbx, rdx
-	sub rdx, rdi
-	cmovs rdx, rbx
-	mov [r8], rdx
-	mov [r8+8*rsi], rax
-	lea r8, [r8+8]
-	dec rcx
-	jnz L_asmNtt2_1
-	lea r8, [r8+8*rsi]
-	lea r9, [r9+16]
-	cmp r8, r10
-	jb L_asmNtt2_0
+	L_asmNtt2_0:
+		mov rcx, rsi
+		mov r11, [r9]
+		mov r12, [r9+8]
+		L_asmNtt2_1:
+			mov rax, [r8+8*rsi]
+			mov rbx, rax
+			mul r12
+			imul rbx, r11
+			imul rdx, rdi
+			sub rbx, rdx
+			lea rax, [rbx+rdi]
+			cmovs rbx, rax
+			mov rax, [r8]
+			lea rdx, [rbx+rax]
+			sub rax, rbx
+			lea rbx, [rax+rdi]
+			cmovs rax, rbx
+			mov rbx, rdx
+			sub rdx, rdi
+			cmovs rdx, rbx
+			mov [r8], rdx
+			mov [r8+8*rsi], rax
+			lea r8, [r8+8]
+			dec rcx
+			jnz L_asmNtt2_1
+		lea r8, [r8+8*rsi]
+		lea r9, [r9+16]
+		cmp r8, r10
+		jb L_asmNtt2_0
 	pop rbx
 	pop rsi
 	pop rdi
@@ -400,55 +400,55 @@ asmINtt proc
 	push rdi
 	push rsi
 	push rbx
-	mov rsi, rcx
-	mov rdi, rdx
-	mov r10, [rsp+48h]
-L_asmINtt_0:
-	mov rbx, [r8+8*rsi]
-	mov rax, [r8]
-	lea rdx, [rbx+rax]
-	sub rax, rbx
-	lea rbx, [rax+rdi]
-	cmovs rax, rbx
-	mov rbx, rdx
-	sub rdx, rdi
-	cmovs rdx, rbx
-	mov [r8], rdx
-	mov [r8+8*rsi], rax
-	lea r8, [r8+8]
-	dec rcx
-	jnz L_asmINtt_0
-L_asmINtt_1:
-	lea r8, [r8+8*rsi]
-	lea r9, [r9+16]
-	cmp r8, r10
-	jae L_asmINtt_3
-	mov rcx, rsi
-	mov r11, [r9]
-	mov r12, [r9+8]
-L_asmINtt_2:
-	mov rbx, [r8+8*rsi]
-	mov rax, [r8]
-	lea rdx, [rbx+rax]
-	sub rax, rbx
-	lea rbx, [rax+rdi]
-	cmovs rax, rbx
-	mov rbx, rdx
-	sub rdx, rdi
-	cmovs rdx, rbx
-	mov [r8], rdx
-	mov rbx, rax
-	mul r12
-	imul rbx, r11
-	imul rdx, rdi
-	sub rbx, rdx
-	lea rax, [rbx+rdi]
-	cmovs rbx, rax
-	mov [r8+8*rsi], rbx
-	lea r8, [r8+8]
-	dec rcx
-	jnz L_asmINtt_2
-	jmp L_asmINtt_1
+	mov rsi, rcx			; rsi = N
+	mov rdi, rdx			; rdi = mod
+	mov r10, [rsp+48h]		; r10 = end
+	L_asmINtt_0:			; <optimization for root[0] == 1>
+		mov rbx, [r8+8*rsi]
+		mov rax, [r8]
+		lea rdx, [rbx+rax]
+		sub rax, rbx
+		lea rbx, [rax+rdi]
+		cmovs rax, rbx			; rax = ([r8] - [r8 + N]) % mod
+		mov rbx, rdx
+		sub rdx, rdi
+		cmovs rdx, rbx			; rdx = ([r8] + [r8 + N]) % mod
+		mov [r8], rdx
+		mov [r8+8*rsi], rax
+		lea r8, [r8+8]
+		dec rcx
+		jnz L_asmINtt_0
+	L_asmINtt_1:			; for (r8 = begin + 2 * N, r9 = iroot + 1; r8 < end; r8 += N, r9 += 2)
+		lea r8, [r8+8*rsi]
+		lea r9, [r9+16]
+		cmp r8, r10
+		jae L_asmINtt_3
+		mov rcx, rsi
+		mov r11, [r9]			; r11 = iroot[]
+		mov r12, [r9+8]			; r12 = ceil(2^64 * iroot[] / mod)
+		L_asmINtt_2:
+			mov rbx, [r8+8*rsi]
+			mov rax, [r8]
+			lea rdx, [rbx+rax]
+			sub rax, rbx
+			lea rbx, [rax+rdi]
+			cmovs rax, rbx			; rax = ([r8] - [r8 + N]) % mod
+			mov rbx, rdx
+			sub rdx, rdi
+			cmovs rdx, rbx			; rdx = ([r8] + [r8 + N]) % mod
+			mov [r8], rdx
+			mov rbx, rax
+			mul r12
+			imul rbx, r11
+			imul rdx, rdi
+			sub rbx, rdx
+			lea rax, [rbx+rdi]
+			cmovs rbx, rax			; rbx = ([r8] - [r8 + N]) * iroot[] % mod
+			mov [r8+8*rsi], rbx
+			lea r8, [r8+8]
+			dec rcx
+			jnz L_asmINtt_2
+		jmp L_asmINtt_1
 L_asmINtt_3:
 	pop rbx
 	pop rsi
@@ -465,36 +465,36 @@ asmINtt2 proc
 	mov rsi, rcx
 	mov rdi, rdx
 	mov r10, [rsp+48h]
-L_asmINtt2_0:
-	mov rcx, rsi
-	mov r11, [r9]
-	mov r12, [r9+8]
-	L_asmINtt2_1:
-	mov rbx, [r8+8*rsi]
-	mov rax, [r8]
-	lea rdx, [rbx+rax]
-	sub rax, rbx
-	lea rbx, [rax+rdi]
-	cmovs rax, rbx
-	mov rbx, rdx
-	sub rdx, rdi
-	cmovs rdx, rbx
-	mov [r8], rdx
-	mov rbx, rax
-	mul r12
-	imul rbx, r11
-	imul rdx, rdi
-	sub rbx, rdx
-	lea rax, [rbx+rdi]
-	cmovs rbx, rax
-	mov [r8+8*rsi], rbx
-	lea r8, [r8+8]
-	dec rcx
-	jnz L_asmINtt2_1
-	lea r8, [r8+8*rsi]
-	lea r9, [r9+16]
-	cmp r8, r10
-	jb L_asmINtt2_0
+	L_asmINtt2_0:
+		mov rcx, rsi
+		mov r11, [r9]
+		mov r12, [r9+8]
+		L_asmINtt2_1:
+			mov rbx, [r8+8*rsi]
+			mov rax, [r8]
+			lea rdx, [rbx+rax]
+			sub rax, rbx
+			lea rbx, [rax+rdi]
+			cmovs rax, rbx
+			mov rbx, rdx
+			sub rdx, rdi
+			cmovs rdx, rbx
+			mov [r8], rdx
+			mov rbx, rax
+			mul r12
+			imul rbx, r11
+			imul rdx, rdi
+			sub rbx, rdx
+			lea rax, [rbx+rdi]
+			cmovs rbx, rax
+			mov [r8+8*rsi], rbx
+			lea r8, [r8+8]
+			dec rcx
+			jnz L_asmINtt2_1
+		lea r8, [r8+8*rsi]
+		lea r9, [r9+16]
+		cmp r8, r10
+		jb L_asmINtt2_0
 	pop rbx
 	pop rsi
 	pop rdi
@@ -515,47 +515,47 @@ asmINttShr proc
 	push rsi
 	push rbx
 	mov r9d, 1
-	shl r9, cl
-	lea r10, [r9-1]
-	shr r9, 1
-	mov r11, rdx
+	shl r9, cl				; r9 = NTT_Size
+	lea r10, [r9-1]			; r10 = mask
+	shr r9, 1				; r9 = N
+	mov r11, rdx			; r11 = mod
 	mov rdi, r9
-L_asmINttShr_0:
-	mov rsi, [r8]
-	mov rax, [r8+r9*8]
-	lea rbx, [rax+rsi]
-	sub rsi, rax
-	lea rdx, [rsi+r11]
-	cmovs rsi, rdx
-	mov rdx, rbx
-	sub rbx, r11
-	cmovs rbx, rdx
-	mov rax, rbx
-	neg rax
-	and rax, r10
-	mul r11
-	add rax, rbx
-	adc rdx, 0
-	shrd rax, rdx, cl
-	mov [r8], rax
-	mov rax, rsi
-	neg rax
-	and rax, r10
-	mul r11
-	add rax, rsi
-	adc rdx, 0
-	shrd rax, rdx, cl
-	mov [r8+r9*8], rax
-	lea r8, [r8+8]
-	dec rdi
-	jnz L_asmINttShr_0
+	L_asmINttShr_0:
+		mov rsi, [r8]
+		mov rax, [r8+r9*8]
+		lea rbx, [rax+rsi]
+		sub rsi, rax
+		lea rdx, [rsi+r11]
+		cmovs rsi, rdx			; rsi = ([r8] - [r8 + N]) % mod
+		mov rdx, rbx
+		sub rbx, r11
+		cmovs rbx, rdx			; rbx = ([r8] + [r8 + N]) % mod
+		mov rax, rbx
+		neg rax
+		and rax, r10			; rax = -rbx % NTT_Size
+		mul r11
+		add rax, rbx
+		adc rdx, 0
+		shrd rax, rdx, cl		; rax = (rbx / NTT_Size) % mod
+		mov [r8], rax
+		mov rax, rsi
+		neg rax
+		and rax, r10
+		mul r11
+		add rax, rsi
+		adc rdx, 0
+		shrd rax, rdx, cl
+		mov [r8+r9*8], rax
+		lea r8, [r8+8]
+		dec rdi
+		jnz L_asmINttShr_0
 	pop rbx
 	pop rsi
 	pop rdi
 	ret
 asmINttShr endp
 
-asmSave proc
+asmSave proc			; what the F is this
 	push r15
 	push r14
 	push r13
@@ -568,62 +568,62 @@ asmSave proc
 	xor r14d, r14d
 	xor r15d, r15d
 	mov r9, rdx
-L_asmSave_0:
-	mov r10, [rcx]
-	mov r11, 5700000000000001h	; m2
-	mov rbx, [r8]
-	sub rbx, r10
-	add rbx, r11
-	mov rax, 599999999999999eh	; m0^-1/m2
-	mul rbx
-	mov rax, 1e73333333333335h	; m0^-1
-	imul rbx, rax
-	imul rdx, r11
-	sub rbx, rdx
-	lea rax, [rbx+r11]
-	cmovs rbx, rax
-	mov r11, 3a00000000000001h	; m1
-	mov rax, 1b00000000000001h	; m0
-	mul rbx
-	mov rsi, rax
-	mov rdi, rdx
-	mov rax, 772c234f72c234fah	; m0/m1
-	mul rbx
-	lea rbx, [rdx+2]
-	imul rbx, r11
-	sub rbx, rsi
-	add rbx, [r9]
-	sub rbx, r10
-	mov rax, 5294a5294a529495h	; m0m2^-1/m1
-	mul rbx
-	mov rax, 12b5ad6b5ad6b5aah	; m0m2^-1
-	imul rbx, rax
-	imul rdx, r11
-	sub rbx, rdx
-	lea rax, [rbx+r11]
-	cmovs rbx, rax
-	add rsi, r10
-	adc rdi, 0
-	mov rax, 7200000000000001h	; m0m2_low
-	mul rbx
-	add rsi, rax
-	adc rdi, rdx
-	mov rax, 92d000000000000h	; m0m2_high
-	mul rbx
-	add rax, rdi
-	adc rdx, 0
-	add rsi, r14
-	adc rax, r15
-	adc rdx, 0
-	mov [r13], rsi
-	mov r14, rax
-	mov r15, rdx
-	lea rcx, [rcx+8]
-	lea r8, [r8+8]
-	lea r9, [r9+8]
-	lea r13, [r13+8]
-	dec r12
-	jnz L_asmSave_0
+	L_asmSave_0:
+		mov r10, [rcx]
+		mov r11, 5700000000000001h	; m2
+		mov rbx, [r8]
+		sub rbx, r10
+		add rbx, r11
+		mov rax, 599999999999999eh	; m0^-1/m2
+		mul rbx
+		mov rax, 1e73333333333335h	; m0^-1
+		imul rbx, rax
+		imul rdx, r11
+		sub rbx, rdx
+		lea rax, [rbx+r11]
+		cmovs rbx, rax
+		mov r11, 3a00000000000001h	; m1
+		mov rax, 1b00000000000001h	; m0
+		mul rbx
+		mov rsi, rax
+		mov rdi, rdx
+		mov rax, 772c234f72c234fah	; m0/m1
+		mul rbx
+		lea rbx, [rdx+2]
+		imul rbx, r11
+		sub rbx, rsi
+		add rbx, [r9]
+		sub rbx, r10
+		mov rax, 5294a5294a529495h	; m0m2^-1/m1
+		mul rbx
+		mov rax, 12b5ad6b5ad6b5aah	; m0m2^-1
+		imul rbx, rax
+		imul rdx, r11
+		sub rbx, rdx
+		lea rax, [rbx+r11]
+		cmovs rbx, rax
+		add rsi, r10
+		adc rdi, 0
+		mov rax, 7200000000000001h	; m0m2_low
+		mul rbx
+		add rsi, rax
+		adc rdi, rdx
+		mov rax, 92d000000000000h	; m0m2_high
+		mul rbx
+		add rax, rdi
+		adc rdx, 0
+		add rsi, r14
+		adc rax, r15
+		adc rdx, 0
+		mov [r13], rsi
+		mov r14, rax
+		mov r15, rdx
+		lea rcx, [rcx+8]
+		lea r8, [r8+8]
+		lea r9, [r9+8]
+		lea r13, [r13+8]
+		dec r12
+		jnz L_asmSave_0
 	pop rdi
 	pop rsi
 	pop rbx
