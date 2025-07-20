@@ -11,16 +11,16 @@
 extern "C" {
 
 	//	_Dst = _Src1 + _Src2; return CF;
-	int asmAdd0(uint64_t _Size, uint64_t* _Dst, const uint64_t* _Src1, const uint64_t* _Src2);
+	uint8_t asmAdd0(uint64_t _Size, uint64_t* _Dst, const uint64_t* _Src1, const uint64_t* _Src2);
 
-	//	_Dst = _Src + 1; return CF; 
-	int asmAdd1(uint64_t _Size, const uint64_t* _Src, uint64_t* _Dst, const void* _Memcpy);
+	//	_Dst = _Src + CF; return CF; 
+	uint8_t asmAdd1(uint64_t _Size, const uint64_t* _Src, uint64_t* _Dst, uint8_t CF);
 
 	//	_Dst = _Src1 - _Src2; return CF;
-	int asmSub0(uint64_t _Size, uint64_t* _Dst, const uint64_t* _Src1, const uint64_t* _Src2);
+	uint8_t asmSub0(uint64_t _Size, uint64_t* _Dst, const uint64_t* _Src1, const uint64_t* _Src2);
 
-	//	_Dst = _Src - 1;
-	void asmSub1(uint64_t _Size, const uint64_t* _Src, uint64_t* _Dst, const void* _Memcpy);
+	//	_Dst = _Src - CF;
+	void asmSub1(uint64_t _Size, const uint64_t* _Src, uint64_t* _Dst, uint8_t CF);
 
 	//	_Dst = _Src << _CL;
 	void asmShl(uint64_t _CL, uint64_t _Size, const uint64_t* _Src, uint64_t* _Dst);
@@ -57,21 +57,13 @@ extern "C" {
 //	_Size1 >= _Size2
 int add(uint64_t* _Dst, const uint64_t* _Src1, uint64_t _Size1, const uint64_t* _Src2, uint64_t _Size2) {
 	int cf = asmAdd0(_Size2, _Dst, _Src1, _Src2);
-	if (cf)
-		return asmAdd1(_Size1 - _Size2, _Src1 + _Size2, _Dst + _Size2, memcpy);
-	else {
-		memcpy(_Dst + _Size2, _Src1 + _Size2, (_Size1 - _Size2) * sizeof(uint64_t));
-		return 0;
-	}
+	return asmAdd1(_Size1 - _Size2, _Src1 + _Size2, _Dst + _Size2, cf);
 }
 
 //	_Src1 >= _Src2
 void sub(uint64_t* _Dst, const uint64_t* _Src1, uint64_t _Size1, const uint64_t* _Src2, uint64_t _Size2) {
 	int cf = asmSub0(_Size2, _Dst, _Src1, _Src2);
-	if (cf)
-		asmSub1(_Size1 - _Size2, _Src1 + _Size2, _Dst + _Size2, memcpy);
-	else
-		memcpy(_Dst + _Size2, _Src1 + _Size2, (_Size1 - _Size2) * sizeof(uint64_t));
+	asmSub1(_Size1 - _Size2, _Src1 + _Size2, _Dst + _Size2, cf);
 }
 
 const uint64_t toom22mul_threshold = 32;
@@ -921,7 +913,7 @@ natural reciprocal(const natural& divs, uint64_t N) {
 
 		if (divs.size > 2 * cur_acc + 1) {
 			tmp.resize(2 * cur_acc + 1);
-			asmAdd1(tmp.size, divs.data + divs.size - tmp.size, tmp.data, memcpy);
+			asmAdd1(tmp.size, divs.data + divs.size - tmp.size, tmp.data, 1);
 		}
 		else
 			tmp._shl(&divs, 2 * cur_acc + 1 - divs.size << 6);
