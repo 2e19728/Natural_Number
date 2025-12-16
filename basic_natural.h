@@ -1,11 +1,10 @@
-#ifndef _2E19728TH_BASIC_NATURAL_H
-#define _2E19728TH_BASIC_NATURAL_H
+#pragma once
 
-#include <initializer_list>
-#include <bit>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
+#include <bit>
+#include <initializer_list>
 
 struct basic_natural {
 
@@ -96,5 +95,3 @@ uint64_t& basic_natural::operator[](uint64_t idx) {
 const uint64_t& basic_natural::operator[](uint64_t idx)const {
 	return data[idx];
 }
-
-#endif
