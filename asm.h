@@ -51,6 +51,8 @@ extern "C" {
 
 	uint64_t asmDiv(uint64_t _Low, uint64_t _High, uint64_t _Mod);
 
+	uint64_t asmDivMod(uint64_t _Low, uint64_t _High, uint64_t _Mod, uint64_t* _Remainder);
+
 	//	_R = ceil(pow(2, 64) / _Mod); return _A % _Mod;
 	uint64_t asmMod(uint64_t _A, uint64_t _R, uint64_t _Mod);
 

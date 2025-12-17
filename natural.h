@@ -224,7 +224,7 @@ natural operator<<(const natural& a, uint64_t b) {
 natural& natural::_shr(const natural* ap, uint64_t b) {
 	uint64_t as = ap->size, n = b >> 6;
 	if (as <= n) {
-		*this = 0ull;
+		*this = uint64_t(0);
 		return *this;
 	}
 	b &= 63;
@@ -534,7 +534,7 @@ natural reciprocal(const natural& divs, uint64_t N) {
 	if (ans[0] == 0)
 		ans[0] = 1ull << 63;
 	else
-		ans[0] = _udiv128(1ull << 63, 0, ans[0], nullptr);
+		ans[0] = asmDiv(0, 1ull << 63, ans[0]);
 	natural tmp;
 	uint64_t acc = N + 1 - divs.size;
 	while (1) {
@@ -575,7 +575,7 @@ uint64_t div_base(const natural& a, uint64_t b, natural& q) {
 	q.resize(a.size);
 	uint64_t r = 0, i = a.size;
 	while (i--)
-		q[i] = _udiv128(r, a[i], b, &r);
+		q[i] = asmDivMod(a[i], r, b, &r);
 	q.std();
 	return r;
 }
@@ -594,16 +594,16 @@ void div_iterative(const natural& a, const natural& b, natural& q, natural& r) {
 }
 
 natural& natural::_div(const natural* ap, const natural* bp, natural* r) {
-	if (*bp == 0ull) {
-		if (*ap == 0ull)
+	if (*bp == uint64_t(0)) {
+		if (*ap == uint64_t(0))
 			*this = 1ull;
 		else
-			*this = 0ull;
-		*r = 0ull;
+			*this = uint64_t(0);
+		*r = uint64_t(0);
 		return *this;
 	}
 	if (*ap < *bp) {
-		*this = 0ull;
+		*this = uint64_t(0);
 		*r = *ap;
 		return *this;
 	}
@@ -756,10 +756,10 @@ natural& natural::dec(const char* begin, const char* end, int i = 0) {
 	natural hi, lo;
 	if (end != nullptr) {
 		i = 63 - std::countl_zero(uint64_t((end - begin + 18) / 19 - 1));
-		if (dec_base[i + 1] == 0ull) {
+		if (dec_base[i + 1] == uint64_t(0)) {
 			int j = 0;
 			do {
-				if (dec_base[j + 1] == 0ull) {
+				if (dec_base[j + 1] == uint64_t(0)) {
 					ni_dec_base[j].NTT_scale = get_NTT_scale(dec_base[j].size, dec_base[j].size);
 					sqr_save_NTT_info(dec_base[j + 1], dec_base[j], ni_dec_base[j]);
 					int n_shl = std::countl_zero(dec_base[j][dec_base[j].size - 1]) + 1 & 63;
@@ -775,7 +775,7 @@ natural& natural::dec(const char* begin, const char* end, int i = 0) {
 			} while (++j <= i);
 		}
 		if (i == -1) {
-			*this = 0ull;
+			*this = uint64_t(0);
 			while (begin != end) {
 				data[0] = data[0] * 10 + *begin - '0';
 				begin++;
@@ -787,7 +787,7 @@ natural& natural::dec(const char* begin, const char* end, int i = 0) {
 	}
 	else {
 		if (i == -1) {
-			*this = 0ull;
+			*this = uint64_t(0);
 			for (int j = 0; j < 19; j++) {
 				data[0] = data[0] * 10 + *begin - '0';
 				begin++;
@@ -839,7 +839,7 @@ std::ostream& natural::_print_dec(std::ostream& os, int i, bool is_first)const {
 			lo -= dec_base[i];
 		}
 	}
-	if (is_first && hi == 0ull) {
+	if (is_first && hi == uint64_t(0)) {
 		lo._print_dec(os, i - 1, 1);
 		return os;
 	}
@@ -865,7 +865,7 @@ std::ostream& operator <<(std::ostream& os, const natural& n) {
 	else if (oldFlags & std::ios::dec) {
 		int i = -1;
 		do {
-			if (dec_base[i + 1] == 0ull) {
+			if (dec_base[i + 1] == uint64_t(0)) {
 				ni_dec_base[i].NTT_scale = get_NTT_scale(dec_base[i].size, dec_base[i].size);
 				sqr_save_NTT_info(dec_base[i + 1], dec_base[i], ni_dec_base[i]);
 				int n_shl = std::countl_zero(dec_base[i][dec_base[i].size - 1]) + 1 & 63;

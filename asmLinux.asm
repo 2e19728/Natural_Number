@@ -1,6 +1,8 @@
 default rel
-section .text
 extern memcpy
+
+section .note.GNU-stack noalloc noexec nowrite progbits
+section .text
 
 global asmAdd0
 asmAdd0:
@@ -49,7 +51,7 @@ asmAdd1:
     mov rdx, rcx
 
 	sub rsp, 8
-    call memcpy
+    call memcpy wrt ..plt
     add rsp, 8
 
 	xor eax, eax
@@ -106,7 +108,7 @@ asmSub1:
     mov rdx, rcx
 
     sub rsp, 8
-    call memcpy
+    call memcpy wrt ..plt
     add rsp, 8
 
 .L_asmSub1_1:
@@ -202,7 +204,7 @@ asmMul1:
 		mov rdi, rsi			; for (rdi = rsi; rdi != 0; rdi -= 1)
 .L_asmMul1_1:
 			mov rax, [rbx]
-			mul qword ptr [r9]	
+			mul qword [r9]	
 			add r11, rax
 			adc r12, rdx
 			adc r13, 0
@@ -226,7 +228,7 @@ asmMul1:
 		mov rdi, rcx			; for (rdi = _Size1; rdi != 0; rdi -= 1)
 .L_asmMul1_3:
 			mov rax, [rbx]
-			mul qword ptr [r9]
+			mul qword [r9]
 			add r11, rax
 			adc r12, rdx
 			adc r13, 0
@@ -247,7 +249,7 @@ asmMul1:
 		mov rdi, rcx			; for (rdi = rcx; rdi != 0; rdi -= 1)
 .L_asmMul1_5:
 			mov rax, [rbx]
-			mul qword ptr [r9]
+			mul qword [r9]
 			add r11, rax
 			adc r12, rdx
 			adc r13, 0
@@ -295,7 +297,7 @@ asmSqr:
 			cmp rsi, rdi
 			jae .L_asmSqr_2
 			mov rax, [rsi]
-			mul qword ptr [rdi]
+			mul qword [rdi]
 			add r11, rax
 			adc r12, rdx
 			adc r13, 0
@@ -873,6 +875,16 @@ asmDiv:
 	div r8
 	ret
 
+global asmDivMod
+asmDivMod:
+	mov r8, rdx
+	mov rdx, rsi
+	mov rax, rdi
+
+	div r8
+	mov [rcx], rdx
+	ret
+
 global asmMod
 asmMod:
 	mov r8, rdx
@@ -1161,6 +1173,7 @@ asmSave:
 		dec r12
 		jnz .L_asmSave_0
 	pop rbx
+	pop rbp
 	pop r12
 	pop r13
 	pop r14

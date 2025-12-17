@@ -809,6 +809,13 @@ asmDiv proc
 	ret
 asmDiv endp
 
+asmDivMod proc
+	mov rax, rcx
+	div r8
+	mov [r9], rdx
+	ret
+asmDivMod endp
+
 asmMod proc
 	mov rax, rcx
 	mul rdx
