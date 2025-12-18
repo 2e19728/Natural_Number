@@ -1,11 +1,12 @@
-extern memcpy:proc
+extern memcpy
 
-.code
+section .text
 
-asmAdd0 proc
+global asmAdd0
+asmAdd0:
 	clc
-	L_asmAdd0_0:
-		jrcxz L_asmAdd0_1
+.L_asmAdd0_0:
+		jrcxz .L_asmAdd0_1
 		mov rax, [r8]
 		adc rax, [r9]
 		lea r8, [r8+8]
@@ -13,39 +14,39 @@ asmAdd0 proc
 		mov [rdx], rax
 		lea rdx, [rdx+8]
 		lea rcx, [rcx-1]
-		jmp L_asmAdd0_0
-L_asmAdd0_1:
+		jmp .L_asmAdd0_0
+.L_asmAdd0_1:
 	adc ecx, ecx
 	mov eax, ecx
 	ret
-asmAdd0 endp
 
-asmAdd1 proc
+global asmAdd1
+asmAdd1:
 	add r9b, 255
-	L_asmAdd1_0:
-		jrcxz L_asmAdd1_1
+.L_asmAdd1_0:
+		jrcxz .L_asmAdd1_1
 		mov rax, [rdx]
 		adc rax, 0
 		lea rdx, [rdx+8]
 		mov [r8], rax
 		lea r8, [r8+8]
 		lea rcx, [rcx-1]
-		jc L_asmAdd1_0
+		jc .L_asmAdd1_0
 	shl rcx, 3
 	xchg rcx, r8
 	call memcpy
 	xor eax, eax
 	ret
-L_asmAdd1_1:
+.L_asmAdd1_1:
 	adc ecx, ecx
 	mov eax, ecx
 	ret
-asmAdd1 endp
 
-asmSub0 proc
+global asmSub0
+asmSub0:
 	clc
-	L_asmSub0_0:
-		jrcxz L_asmSub0_1
+.L_asmSub0_0:
+		jrcxz .L_asmSub0_1
 		mov rax, [r8]
 		sbb rax, [r9]
 		lea r8, [r8+8]
@@ -53,70 +54,70 @@ asmSub0 proc
 		mov [rdx], rax
 		lea rdx, [rdx+8]
 		lea rcx, [rcx-1]
-		jmp L_asmSub0_0
-L_asmSub0_1:
+		jmp .L_asmSub0_0
+.L_asmSub0_1:
 	adc ecx, ecx
 	mov eax, ecx
 	ret
-asmSub0 endp
 
-asmSub1 proc
+global asmSub1
+asmSub1:
 	add r9b, 255
-	L_asmSub1_0:
-		jrcxz L_asmSub1_1
+.L_asmSub1_0:
+		jrcxz .L_asmSub1_1
 		mov rax, [rdx]
 		sbb rax, 0
 		lea rdx, [rdx+8]
 		mov [r8], rax
 		lea r8, [r8+8]
 		lea rcx, [rcx-1]
-		jc L_asmSub1_0
+		jc .L_asmSub1_0
 	shl rcx, 3
 	xchg rcx, r8
 	call memcpy
-L_asmSub1_1:
+.L_asmSub1_1:
 	ret
-asmSub1 endp
 
-asmShl proc
+global asmShl
+asmShl:
 	xor r11d, r11d
 	lea r8, [r8-8]
-	L_asmShl:
+.L_asmShl:
 		mov r10, [r8+rdx*8]
 		shld r11, r10, cl
 		mov [r9+rdx*8], r11
 		mov r11, r10
 		dec rdx
-		jnz L_asmShl
+		jnz .L_asmShl
 	shl r11, cl
 	mov [r9], r11
 	ret
-asmShl endp
 
-asmShr proc
+global asmShr
+asmShr:
 	mov r10, [r8]
 	lea r8, [r8+rdx*8]
 	dec rdx
 	lea r9, [r9+rdx*8]
 	neg rdx
-	jz L_asmShr_1
-	L_asmShr_0:
+	jz .L_asmShr_1
+.L_asmShr_0:
 		mov r11, [r8+rdx*8]
 		shrd r10, r11, cl
 		mov [r9+rdx*8], r10
 		mov r10, r11
 		inc rdx
-		jnz L_asmShr_0
-L_asmShr_1:
+		jnz .L_asmShr_0
+.L_asmShr_1:
 	shr r10, cl
 	mov [r9], r10
 	ret
-asmShr endp
 
-asmMul0 proc
+global asmMul0
+asmMul0:
 	mov r10, rdx
 	xor r11d, r11d
-	L_asmMul0_0:
+.L_asmMul0_0:
 		mov rax, [r8]
 		mul r10
 		add rax, r11
@@ -126,12 +127,12 @@ asmMul0 proc
 		lea r8, [r8+8]
 		lea r9, [r9+8]
 		dec rcx
-		jnz L_asmMul0_0
+		jnz .L_asmMul0_0
 	mov [r9], r11
 	ret
-asmMul0 endp
 
-asmMul1 proc
+global asmMul1
+asmMul1:
 	push r14
 	push r13
 	push r12
@@ -145,19 +146,19 @@ asmMul1 proc
 	mov r14, rdx
 	sub r14, rcx			; r14 = _Size2 - _Size1
 	mov esi, 1				; for (rsi = 1; rsi < _Size1; rsi += 1)
-	L_asmMul1_0:
+.L_asmMul1_0:
 		mov rbx, r8				; rbx = _Src1
 		mov rdi, rsi			; for (rdi = rsi; rdi != 0; rdi -= 1)
-		L_asmMul1_1:
+.L_asmMul1_1:
 			mov rax, [rbx]
-			mul qword ptr [r9]	
+			mul qword [r9]	
 			add r11, rax
 			adc r12, rdx
 			adc r13, 0
 			lea r9, [r9-8]
 			lea rbx, [rbx+8]
 			dec rdi
-			jnz L_asmMul1_1
+			jnz .L_asmMul1_1
 		mov [r10], r11
 		mov r11, r12
 		mov r12, r13
@@ -166,22 +167,22 @@ asmMul1 proc
 		lea r9, [r9+rsi*8]		; _Src2 += 1
 		lea r10, [r10+8]
 		cmp rsi, rcx
-		jb L_asmMul1_0
+		jb .L_asmMul1_0
 	test r14, r14
-	jz L_asmMul1_4			; for (r14 = _Size2 - _Size1; r14 != 0; r14 -= 1)
-	L_asmMul1_2:
+	jz .L_asmMul1_4			; for (r14 = _Size2 - _Size1; r14 != 0; r14 -= 1)
+.L_asmMul1_2:
 		mov rbx, r8				; rbx = _Src1
 		mov rdi, rcx			; for (rdi = _Size1; rdi != 0; rdi -= 1)
-		L_asmMul1_3:
+.L_asmMul1_3:
 			mov rax, [rbx]
-			mul qword ptr [r9]
+			mul qword [r9]
 			add r11, rax
 			adc r12, rdx
 			adc r13, 0
 			lea r9, [r9-8]
 			lea rbx, [rbx+8]
 			dec rdi
-			jnz L_asmMul1_3
+			jnz .L_asmMul1_3
 		mov [r10], r11
 		mov r11, r12
 		mov r12, r13
@@ -189,20 +190,20 @@ asmMul1 proc
 		lea r9, [r9+rcx*8+8]	; _Src2 += 1
 		lea r10, [r10+8]
 		dec r14
-		jnz L_asmMul1_2
-	L_asmMul1_4:				; for (rcx = _Size1, r8 = _Src1; rcx != 0; rcx -= 1, r8 += 1)
+		jnz .L_asmMul1_2
+.L_asmMul1_4:				; for (rcx = _Size1, r8 = _Src1; rcx != 0; rcx -= 1, r8 += 1)
 		mov rbx, r8
 		mov rdi, rcx			; for (rdi = rcx; rdi != 0; rdi -= 1)
-		L_asmMul1_5:
+.L_asmMul1_5:
 			mov rax, [rbx]
-			mul qword ptr [r9]
+			mul qword [r9]
 			add r11, rax
 			adc r12, rdx
 			adc r13, 0
 			lea r9, [r9-8]
 			lea rbx, [rbx+8]
 			dec rdi
-			jnz L_asmMul1_5
+			jnz .L_asmMul1_5
 		mov [r10], r11
 		mov r11, r12
 		mov r12, r13
@@ -211,7 +212,7 @@ asmMul1 proc
 		lea r9, [r9+rcx*8]
 		lea r10, [r10+8]
 		dec rcx
-		jnz L_asmMul1_4
+		jnz .L_asmMul1_4
 	mov [r10], r11
 	pop rbx
 	pop rsi
@@ -220,9 +221,9 @@ asmMul1 proc
 	pop r13
 	pop r14
 	ret
-asmMul1 endp
 
-asmSqr proc
+global asmSqr
+asmSqr:
 	push r15
 	push r14
 	push r13
@@ -233,35 +234,35 @@ asmSqr proc
 	mov r10, rdx			; r10 = _Dst
 	xor r14d, r14d
 	xor r15d, r15d
-	L_asmSqr_0:				; do while (r8 <= r9)
+.L_asmSqr_0:				; do while (r8 <= r9)
 		mov rsi, r8
 		mov rdi, r9				; for (rsi = r8, rdi = r9; rsi < rdi; rsi += 1, rdi -= 1)
 		xor r11d, r11d
 		xor r12d, r12d
 		xor r13d, r13d
-		L_asmSqr_1:
+.L_asmSqr_1:
 			cmp rsi, rdi
-			jae L_asmSqr_2
+			jae .L_asmSqr_2
 			mov rax, [rsi]
-			mul qword ptr [rdi]
+			mul qword [rdi]
 			add r11, rax
 			adc r12, rdx
 			adc r13, 0
 			lea rsi, [rsi+8]
 			lea rdi, [rdi-8]
-			jmp L_asmSqr_1
-	L_asmSqr_2:
+			jmp .L_asmSqr_1
+.L_asmSqr_2:
 		add r11, r11
 		adc r12, r12
 		adc r13, r13
 		cmp rsi, rdi
-		jne L_asmSqr_3
+		jne .L_asmSqr_3
 		mov rax, [rsi]
 		mul rax
 		add r11, rax
 		adc r12, rdx
 		adc r13, 0
-	L_asmSqr_3:
+.L_asmSqr_3:
 		add r11, r14
 		adc r12, r15
 		adc r13, 0
@@ -275,9 +276,9 @@ asmSqr proc
 		lea rdx, [r8+8]
 		cmovle r8, rdx			; else r8 += 1
 		cmp r8, r9
-		ja L_asmSqr_4
-		jmp L_asmSqr_0
-L_asmSqr_4:
+		ja .L_asmSqr_4
+		jmp .L_asmSqr_0
+.L_asmSqr_4:
 	mov [r10], r14
 	pop rsi
 	pop rdi
@@ -286,9 +287,9 @@ L_asmSqr_4:
 	pop r14
 	pop r15
 	ret
-asmSqr endp
 
-asmNtt proc
+global asmNtt
+asmNtt:
 	push r15
 	push r14
 	push r13
@@ -301,7 +302,7 @@ asmNtt proc
 	mov rdi, rdx			; rdi = mod
 	mov rbp, [rsp+68h]		; rbp = end
 	shr rcx, 1
-	L_asmNtt_0:				; <optimization for root[0] == 1>
+.L_asmNtt_0:				; <optimization for root[0] == 1>
 		mov r12, [r8]
 		mov r13, [r8+8]
 		mov r14, [r8+8*rsi]
@@ -335,17 +336,17 @@ asmNtt proc
 		
 		lea r8, [r8+16]
 		dec rcx
-		jnz L_asmNtt_0
-	L_asmNtt_1:
+		jnz .L_asmNtt_0
+.L_asmNtt_1:
 		lea r8, [r8+8*rsi]
 		lea r9, [r9+16]
 		cmp r8, rbp
-		jae L_asmNtt_3
+		jae .L_asmNtt_3
 		mov rcx, rsi
 		mov rbx, [r9]			; rbx = root[]
 		mov rdx, [r9+8]			; rdx = ceil(2^64 * root[] / mod)
 		shr rcx, 1
-		L_asmNtt_2:
+.L_asmNtt_2:
 			mov r12, [r8]
 			mov r13, [r8+8]
 			mov r14, [r8+8*rsi]
@@ -386,9 +387,9 @@ asmNtt proc
 			
 			lea r8, [r8+16]
 			dec rcx
-			jnz L_asmNtt_2
-		jmp L_asmNtt_1
-L_asmNtt_3:
+			jnz .L_asmNtt_2
+		jmp .L_asmNtt_1
+.L_asmNtt_3:
 	pop rbx
 	pop rbp
 	pop rsi
@@ -398,9 +399,9 @@ L_asmNtt_3:
 	pop r14
 	pop r15
 	ret
-asmNtt endp
 
-asmNtt2 proc
+global asmNtt2
+asmNtt2:
 	push r15
 	push r14
 	push r13
@@ -411,7 +412,7 @@ asmNtt2 proc
 	push rbx
 	mov rdi, rdx
 	mov rbp, [rsp+68h]
-	L_asmNtt2:
+.L_asmNtt2:
 		mov rbx, [r9]
 		mov rdx, [r9+8]
 		mov rsi, [r9+16]
@@ -467,7 +468,7 @@ asmNtt2 proc
 		lea r8, [r8+32]
 		lea r9, [r9+32]
 		cmp r8, rbp
-		jb L_asmNtt2
+		jb .L_asmNtt2
 	pop rbx
 	pop rbp
 	pop rsi
@@ -477,9 +478,9 @@ asmNtt2 proc
 	pop r14
 	pop r15
 	ret
-asmNtt2 endp
 
-asmNtt3 proc
+global asmNtt3
+asmNtt3:
 	push r15
 	push r14
 	push r13
@@ -491,12 +492,12 @@ asmNtt3 proc
 	mov rsi, rcx
 	mov rdi, rdx
 	mov rbp, [rsp+68h]
-	L_asmNtt3_0:
+.L_asmNtt3_0:
 		mov rcx, rsi
 		mov rbx, [r9]
 		mov rdx, [r9+8]
 		shr rcx, 1
-		L_asmNtt3_1:
+.L_asmNtt3_1:
 			mov r12, [r8]
 			mov r13, [r8+8]
 			mov r14, [r8+8*rsi]
@@ -537,11 +538,11 @@ asmNtt3 proc
 			
 			lea r8, [r8+16]
 			dec rcx
-			jnz L_asmNtt3_1
+			jnz .L_asmNtt3_1
 		lea r8, [r8+8*rsi]
 		lea r9, [r9+16]
 		cmp r8, rbp
-		jb L_asmNtt3_0
+		jb .L_asmNtt3_0
 	pop rbx
 	pop rbp
 	pop rsi
@@ -551,9 +552,9 @@ asmNtt3 proc
 	pop r14
 	pop r15
 	ret
-asmNtt3 endp
 
-asmINtt proc
+global asmINtt
+asmINtt:
 	push r15
 	push r14
 	push r13
@@ -566,7 +567,7 @@ asmINtt proc
 	mov rdi, rdx			; rdi = mod
 	mov rbp, [rsp+68h]		; rbp = end
 	shr rcx, 1
-	L_asmINtt_0:			; <optimization for root[0] == 1>
+.L_asmINtt_0:			; <optimization for root[0] == 1>
 		mov r12, [r8]
 		mov r13, [r8+8]
 		mov r14, [r8+8*rsi]
@@ -596,17 +597,17 @@ asmINtt proc
 		
 		lea r8, [r8+16]
 		dec rcx
-		jnz L_asmINtt_0
-	L_asmINtt_1:			; for (r8 = begin + 2 * N, r9 = iroot + 2; r8 < end; r8 += N, r9 += 2)
+		jnz .L_asmINtt_0
+.L_asmINtt_1:			; for (r8 = begin + 2 * N, r9 = iroot + 2; r8 < end; r8 += N, r9 += 2)
 		lea r8, [r8+8*rsi]
 		lea r9, [r9+16]
 		cmp r8, rbp
-		jae L_asmINtt_3
+		jae .L_asmINtt_3
 		mov rcx, rsi
 		mov rbx, [r9]			; r11 = iroot[]
 		mov rdx, [r9+8]			; r12 = ceil(2^64 * iroot[] / mod)
 		shr rcx, 1
-		L_asmINtt_2:
+.L_asmINtt_2:
 			mov r12, [r8]
 			mov r13, [r8+8]
 			mov r14, [r8+8*rsi]
@@ -646,9 +647,9 @@ asmINtt proc
 
 			lea r8, [r8+16]
 			dec rcx
-			jnz L_asmINtt_2
-		jmp L_asmINtt_1
-L_asmINtt_3:
+			jnz .L_asmINtt_2
+		jmp .L_asmINtt_1
+.L_asmINtt_3:
 	pop rbx
 	pop rbp
 	pop rsi
@@ -658,9 +659,9 @@ L_asmINtt_3:
 	pop r14
 	pop r15
 	ret
-asmINtt endp
 
-asmINtt2 proc
+global asmINtt2
+asmINtt2:
 	push r15
 	push r14
 	push r13
@@ -671,7 +672,7 @@ asmINtt2 proc
 	push rbx
 	mov rdi, rdx
 	mov rbp, [rsp+68h]
-	L_asmINtt2:
+.L_asmINtt2:
 		mov rbx, [r9]
 		mov rdx, [r9+8]
 		mov rsi, [r9+16]
@@ -718,7 +719,7 @@ asmINtt2 proc
 		lea r8, [r8+32]
 		lea r9, [r9+32]
 		cmp r8, rbp
-		jb L_asmINtt2
+		jb .L_asmINtt2
 	pop rbx
 	pop rbp
 	pop rsi
@@ -728,9 +729,9 @@ asmINtt2 proc
 	pop r14
 	pop r15
 	ret
-asmINtt2 endp
 
-asmINtt3 proc
+global asmINtt3
+asmINtt3:
 	push r15
 	push r14
 	push r13
@@ -742,12 +743,12 @@ asmINtt3 proc
 	mov rsi, rcx
 	mov rdi, rdx
 	mov rbp, [rsp+68h]
-	L_asmINtt3_0:
+.L_asmINtt3_0:
 		mov rcx, rsi
 		mov rbx, [r9]
 		mov rdx, [r9+8]
 		shr rcx, 1
-		L_asmINtt3_1:
+.L_asmINtt3_1:
 			mov r12, [r8]
 			mov r13, [r8+8]
 			mov r14, [r8+8*rsi]
@@ -787,11 +788,11 @@ asmINtt3 proc
 
 			lea r8, [r8+16]
 			dec rcx
-			jnz L_asmINtt3_1
+			jnz .L_asmINtt3_1
 		lea r8, [r8+8*rsi]
 		lea r9, [r9+16]
 		cmp r8, rbp
-		jb L_asmINtt3_0
+		jb .L_asmINtt3_0
 	pop rbx
 	pop rbp
 	pop rsi
@@ -801,22 +802,22 @@ asmINtt3 proc
 	pop r14
 	pop r15
 	ret
-asmINtt3 endp
 
-asmDiv proc
+global asmDiv
+asmDiv:
 	mov rax, rcx
 	div r8
 	ret
-asmDiv endp
 
-asmDivMod proc
+global asmDivMod
+asmDivMod:
 	mov rax, rcx
 	div r8
 	mov [r9], rdx
 	ret
-asmDivMod endp
 
-asmMod proc
+global asmMod
+asmMod:
 	mov rax, rcx
 	mul rdx
 	imul rdx, r8
@@ -824,9 +825,9 @@ asmMod proc
 	lea rax, [rcx+r8]
 	cmovns rax, rcx
 	ret
-asmMod endp
 
-asmMulMod proc
+global asmMulMod
+asmMulMod:
 	mov rax, rcx
 	mul rdx
 	mov rcx, rax
@@ -843,9 +844,9 @@ asmMulMod proc
 	lea rax, [rcx+r8]
 	cmovns rax, rcx
 	ret
-asmMulMod endp
 
-asmINttShr proc
+global asmINttShr
+asmINttShr:
 	push r15
 	push r14
 	push r13
@@ -863,7 +864,7 @@ asmINttShr proc
 	mov r9, rdx
 	shr rbp, 1
 	shr r9, cl
-	L_asmINttShr:
+.L_asmINttShr:
 		mov r12, [r8]
 		mov r13, [r8+8]
 		mov r14, [r8+8*rsi]
@@ -933,7 +934,7 @@ asmINttShr proc
 
 		lea r8, [r8+16]
 		dec rbp
-		jnz L_asmINttShr
+		jnz .L_asmINttShr
 	pop rbx
 	pop rbp
 	pop rsi
@@ -943,9 +944,9 @@ asmINttShr proc
 	pop r14
 	pop r15
 	ret
-asmINttShr endp
 
-asmNttMul proc
+global asmNttMul
+asmNttMul:
 	push r13
 	push r12
 	push rdi
@@ -954,7 +955,7 @@ asmNttMul proc
 	mov rbx, rdx
 	mov rsi, [rsp+58h]		; rsi = mod_124
 	mov rdi, [rsp+50h]		; rdi = mod
-	L_asmNttMul:
+.L_asmNttMul:
 		mov rdx, [r8]
 		mov rax, [r9]
 		mulx r11, r10, rax
@@ -973,16 +974,16 @@ asmNttMul proc
 		lea r8, [r8+8]
 		lea r9, [r9+8]
 		dec rcx
-		jnz L_asmNttMul
+		jnz .L_asmNttMul
 	pop rbx
 	pop rsi
 	pop rdi
 	pop r12
 	pop r13
 	ret
-asmNttMul endp
 
-asmLoad proc
+global asmLoad
+asmLoad:
 	push r13
 	push r12
 	push rdi
@@ -990,7 +991,7 @@ asmLoad proc
 	push rbx
 	mov rdi, [rsp+58h]		; rdi = mod
 	mov r10, [rsp+50h]		; r10 = _Src
-	L_asmLoad:
+.L_asmLoad:
 		mov r11, [r10]
 		mulx rbx, rax, r11
 		imul rbx, rdi
@@ -1003,16 +1004,16 @@ asmLoad proc
 		lea r9, [r9+8]
 		lea r10, [r10+8]
 		dec rcx
-		jnz L_asmLoad
+		jnz .L_asmLoad
 	pop rbx
 	pop rsi
 	pop rdi
 	pop r12
 	pop r13
 	ret
-asmLoad endp
 
-asmSave proc			; what the F is this
+global asmSave
+asmSave:			; what the F is this
 	push r15
 	push r14
 	push r13
@@ -1025,7 +1026,7 @@ asmSave proc			; what the F is this
 	xor r14d, r14d
 	xor r15d, r15d
 	mov r9, rdx
-	L_asmSave_0:
+.L_asmSave_0:
 		mov r10, [rcx]
 		mov r11, 5700000000000001h	; m2
 		mov rbx, [r8]
@@ -1080,7 +1081,7 @@ asmSave proc			; what the F is this
 		lea r9, [r9+8]
 		lea r13, [r13+8]
 		dec r12
-		jnz L_asmSave_0
+		jnz .L_asmSave_0
 	pop rdi
 	pop rsi
 	pop rbx
@@ -1089,6 +1090,3 @@ asmSave proc			; what the F is this
 	pop r14
 	pop r15
 	ret
-asmSave endp
-
-end
