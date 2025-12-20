@@ -7,7 +7,6 @@ const uint64_t NTTmul_threshold = 384;
 struct NTT_info {
 
 	static const uint64_t mods[3];
-	static const uint64_t mods_64[3];
 	static const uint64_t mods_124[3];
 	static const uint64_t root_base[3][56];
 	static const uint64_t iroot_base[3][56];
@@ -18,6 +17,7 @@ struct NTT_info {
 	int NTT_scale;
 
 	static void init(int _NTT_scale) {
+		_NTT_scale -= 1;
 		if (_NTT_scale <= root_scale)
 			return;
 		for (int i = 0; i < 3; i++) {
@@ -64,8 +64,6 @@ const uint64_t NTT_info::mods[3] = {
 	58ull << 56 | 1,
 	87ull << 56 | 1
 };
-
-const uint64_t NTT_info::mods_64[3] = { 10, 5, 3 };
 
 const uint64_t NTT_info::mods_124[3] = {
 	0x97b425ed097b425a,
@@ -140,6 +138,7 @@ basic_natural NTT_info::iroot[3] = { { 1, 10 }, { 1, 5 }, { 1, 3 } };
 int NTT_info::root_scale = 1;
 
 void NTT_info::load(const uint64_t* _Src, uint64_t _Size, int _NTT_scale) {
+	static const uint64_t mods_64[3] = { 10, 5, 3 };
 	NTT_scale = _NTT_scale;
 	uint64_t N = 1ull << _NTT_scale - 1;
 	for (int i = 0; i < 3; i++)
@@ -160,8 +159,6 @@ void NTT_info::load(const uint64_t* _Src, uint64_t _Size, int _NTT_scale) {
 				info[i][j + N] = n0 - n1 + mods[i];
 			}
 			asmLoad(N + N - _Size, mods_64[i], info[i].data + j, info[i].data + N + j, _Src + j, mods[i]);
-			//for (; j < N; j++)
-			//	info[i][j] = info[i][j + N] = asmMod(_Src[j], mods_64[i], mods[i]);
 		}
 	}
 	init(NTT_scale);
@@ -174,33 +171,27 @@ void NTT_info::load(const basic_natural& n, int _NTT_scale) {
 const int NTT_scale_L3_threshold = 20;
 void NTT_info::NTT() {
 	if (NTT_scale <= NTT_scale_L3_threshold) {
-		for (int i = 0; i < 3; i++) {
+		for (int i = 0; i < 3; i++)
 			for (uint64_t j = 1ull << NTT_scale - 2; j > 1; j >>= 1)
 				asmNtt(j, mods[i], info[i].data, root[i].data, info[i].data + info[i].size);
-			asmNtt2(1, mods[i], info[i].data, root[i].data, info[i].data + info[i].size);
-		}
 		return;
 	}
 	for (int i = 0; i < 3; i++) {
 		for (uint64_t j = 1ull << NTT_scale - 2; j >= 1ull << NTT_scale_L3_threshold; j >>= 1)
 			asmNtt(j, mods[i], info[i].data, root[i].data, info[i].data + info[i].size);
+
 		for (int j = NTT_scale_L3_threshold - 1; j > 0; j--)
 			asmNtt(1ull << j, mods[i], info[i].data, root[i].data, info[i].data + (1 << NTT_scale_L3_threshold));
-		asmNtt2(1, mods[i], info[i].data, root[i].data, info[i].data + (1 << NTT_scale_L3_threshold));
-		for (uint64_t k = 1; k < info[i].size >> NTT_scale_L3_threshold; k++) {
+		for (uint64_t k = 1; k < info[i].size >> NTT_scale_L3_threshold; k++)
 			for (int j = NTT_scale_L3_threshold - 1; j > 0; j--)
-				asmNtt3(1ull << j, mods[i], info[i].data + (k << NTT_scale_L3_threshold),
+				asmNtt2(1ull << j, mods[i], info[i].data + (k << NTT_scale_L3_threshold),
 					root[i].data + (k << NTT_scale_L3_threshold - j), info[i].data + (k + 1 << NTT_scale_L3_threshold));
-			asmNtt2(1, mods[i], info[i].data + (k << NTT_scale_L3_threshold),
-				root[i].data + (k << NTT_scale_L3_threshold), info[i].data + (k + 1 << NTT_scale_L3_threshold));
-		}
 	}
 }
 
 void NTT_info::INTT() {
 	if (NTT_scale <= NTT_scale_L3_threshold) {
 		for (int i = 0; i < 3; i++) {
-			asmINtt2(1, mods[i], info[i].data, iroot[i].data, info[i].data + info[i].size);
 			for (uint64_t j = 2; j < 1ull << NTT_scale - 1; j <<= 1)
 				asmINtt(j, mods[i], info[i].data, iroot[i].data, info[i].data + info[i].size);
 			asmINttShr(NTT_scale, mods[i], info[i].data);
@@ -208,29 +199,26 @@ void NTT_info::INTT() {
 		return;
 	}
 	for (int i = 0; i < 3; i++) {
-		asmINtt2(1, mods[i], info[i].data, iroot[i].data, info[i].data + (1 << NTT_scale_L3_threshold));
 		for (int j = 1; j < NTT_scale_L3_threshold; j++)
 			asmINtt(1ull << j, mods[i], info[i].data, iroot[i].data, info[i].data + (1 << NTT_scale_L3_threshold));
-		for (uint64_t k = 1; k < info[i].size >> NTT_scale_L3_threshold; k++) {
-			asmINtt2(1, mods[i], info[i].data + (k << NTT_scale_L3_threshold),
-				iroot[i].data + (k << NTT_scale_L3_threshold), info[i].data + (k + 1 << NTT_scale_L3_threshold));
+		for (uint64_t k = 1; k < info[i].size >> NTT_scale_L3_threshold; k++)
 			for (int j = 1; j < NTT_scale_L3_threshold; j++)
-				asmINtt3(1ull << j, mods[i], info[i].data + (k << NTT_scale_L3_threshold),
+				asmINtt2(1ull << j, mods[i], info[i].data + (k << NTT_scale_L3_threshold),
 					iroot[i].data + (k << NTT_scale_L3_threshold - j), info[i].data + (k + 1 << NTT_scale_L3_threshold));
-		}
+
 		for (uint64_t j = 1ull << NTT_scale_L3_threshold; j < 1ull << NTT_scale - 1; j <<= 1)
 			asmINtt(j, mods[i], info[i].data, iroot[i].data, info[i].data + info[i].size);
 		asmINttShr(NTT_scale, mods[i], info[i].data);
 	}
 }
 
+void (* const asmNttMul[3])(uint64_t, uint64_t*, const uint64_t*, const uint64_t*, const uint64_t*) = { asmNttMul0, asmNttMul1, asmNttMul2 };
 void NTT_info::mul(const NTT_info& ni_a, const NTT_info& ni_b) {
 	NTT_scale = ni_a.NTT_scale;
 	uint64_t NTT_Size = 1ull << NTT_scale;
 	for (int i = 0; i < 3; i++) {
 		info[i].resize(ni_a.info[i].size);
-		asmNttMul(NTT_Size, info[i].data, ni_a.info[i].data, ni_b.info[i].data, mods[i], mods_124[i]);
-		//		for (uint64_t j = 0; j < NTT_Size; j++) info[i][j] = asmMulMod(ni_a.info[i][j], ni_b.info[i][j], mods[i], mods_124[i]);
+		asmNttMul[i](NTT_Size, info[i].data, ni_a.info[i].data, ni_b.info[i].data, root[i].data);
 	}
 }
 

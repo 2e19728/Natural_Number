@@ -37,15 +37,15 @@ extern "C" {
 
 	void asmNtt2(uint64_t _N, uint64_t _Mod, uint64_t* _Begin, const uint64_t* _Root, uint64_t* _End);
 
-	void asmNtt3(uint64_t _N, uint64_t _Mod, uint64_t* _Begin, const uint64_t* _Root, uint64_t* _End);
+	void asmNttMul0(uint64_t _N, uint64_t* _Dst, const uint64_t* _Src1, const uint64_t* _Src2, const uint64_t* _Root);
 
-	void asmNttMul(uint64_t _N, uint64_t* _Dst, const uint64_t* _Src1, const uint64_t* _Src2, uint64_t _Mod, uint64_t _Mod_124);
+	void asmNttMul1(uint64_t _N, uint64_t* _Dst, const uint64_t* _Src1, const uint64_t* _Src2, const uint64_t* _Root);
+
+	void asmNttMul2(uint64_t _N, uint64_t* _Dst, const uint64_t* _Src1, const uint64_t* _Src2, const uint64_t* _Root);
 
 	void asmINtt(uint64_t _N, uint64_t _Mod, uint64_t* _Begin, const uint64_t* _Root, uint64_t* _End);
 
 	void asmINtt2(uint64_t _N, uint64_t _Mod, uint64_t* _Begin, const uint64_t* _Root, uint64_t* _End);
-
-	void asmINtt3(uint64_t _N, uint64_t _Mod, uint64_t* _Begin, const uint64_t* _Root, uint64_t* _End);
 
 	void asmINttShr(int _Scale, uint64_t _Mod, uint64_t* _Begin);
 
