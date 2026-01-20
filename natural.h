@@ -9,6 +9,7 @@
 #include <string>
 #include <iostream>
 #include <algorithm>
+#include <string_view>
 
 struct natural :basic_natural {
 
@@ -16,8 +17,8 @@ struct natural :basic_natural {
 		data[0] = n;
 	}
 
-	natural(const char* s) {
-		*this = s;
+	natural(std::string_view sv) {
+		*this = sv;
 	}
 
 	natural(const natural& n) :basic_natural(n) {}
@@ -30,15 +31,15 @@ struct natural :basic_natural {
 
 	natural& operator=(uint64_t);
 
-	natural& operator=(const char*);
+	natural& operator=(std::string_view);
 
 	natural& operator=(const natural&);
 
 	natural& operator=(natural&&) noexcept;
 
-	natural& hex(const char*);
+	natural& hex(std::string_view);
 
-	natural& dec(const char*, const char*, int);
+	natural& dec(std::string_view);
 
 	natural& _or(const natural*, const natural*);
 
@@ -91,10 +92,13 @@ natural& natural::operator=(uint64_t n) {
 	return *this;
 }
 
-natural& natural::operator=(const char* s) {
-	if (s[0] == '0')
-		if (tolower(s[1]) == 'x')
-			hex(s + 2);
+natural& natural::operator=(std::string_view sv) {
+	if (sv.size() > 1 && sv[0] == '0' && tolower(sv[1]) == 'x') {
+		sv.remove_prefix(2);
+		hex(sv);
+	}
+	else
+		dec(sv);
 	return *this;
 }
 
@@ -108,14 +112,15 @@ natural& natural::operator=(natural&& n) noexcept {
 	return *this;
 }
 
-natural& natural::hex(const char* s) {
-	static const char hexStr[4] = { 0, 48, 55, 87 };
-	uint64_t ss = strlen(s);
-	if (s[0] == '0' && tolower(s[1]) == 'x')
-		s += 2, ss -= 2;
-	resize((ss + 15) >> 4);
-	uint64_t i = -ss & 15, j = size;
-	s -= i;
+natural& natural::hex(std::string_view sv) {
+	static const char hexStr[8] = { 0, 48, 55, 87 };
+	if (sv.empty()) {
+		*this = 0;
+		return *this;
+	}
+	resize(sv.size() + 15 >> 4);
+	uint64_t i = -sv.size() & 15, j = size;
+	const char* s = sv.data() - i;
 	while (j--) {
 		uint64_t x = 0;
 		for (; i < 16; i++) {
@@ -224,7 +229,7 @@ natural operator<<(const natural& a, uint64_t b) {
 natural& natural::_shr(const natural* ap, uint64_t b) {
 	uint64_t as = ap->size, n = b >> 6;
 	if (as <= n) {
-		*this = uint64_t(0);
+		*this = 0;
 		return *this;
 	}
 	b &= 63;
@@ -594,16 +599,16 @@ void div_iterative(const natural& a, const natural& b, natural& q, natural& r) {
 }
 
 natural& natural::_div(const natural* ap, const natural* bp, natural* r) {
-	if (*bp == uint64_t(0)) {
-		if (*ap == uint64_t(0))
+	if (*bp == 0) {
+		if (*ap == 0)
 			*this = 1ull;
 		else
-			*this = uint64_t(0);
-		*r = uint64_t(0);
+			*this = 0;
+		*r = 0;
 		return *this;
 	}
 	if (*ap < *bp) {
-		*this = uint64_t(0);
+		*this = 0;
 		*r = *ap;
 		return *this;
 	}
@@ -752,51 +757,35 @@ void calc_pi(natural& num, natural& den, natural& numc, uint64_t begin, uint64_t
 natural dec_base[64] = { 10000000000000000000ull }, dec_base_r[64];
 NTT_info ni_dec_base[64], ni_dec_base_r[64];
 
-natural& natural::dec(const char* begin, const char* end, int i = 0) {
+natural& natural::dec(std::string_view sv) {
 	natural hi, lo;
-	if (end != nullptr) {
-		i = 63 - std::countl_zero(uint64_t((end - begin + 18) / 19 - 1));
-		if (dec_base[i + 1] == uint64_t(0)) {
-			int j = 0;
-			do {
-				if (dec_base[j + 1] == uint64_t(0)) {
-					ni_dec_base[j].NTT_scale = get_NTT_scale(dec_base[j].size, dec_base[j].size);
-					sqr_save_NTT_info(dec_base[j + 1], dec_base[j], ni_dec_base[j]);
-					int n_shl = std::countl_zero(dec_base[j][dec_base[j].size - 1]) + 1 & 63;
-					dec_base_r[j] = reciprocal(dec_base[j] << n_shl, dec_base[j].size * 2 + 1);
-					ni_dec_base_r[j].NTT_scale = get_NTT_scale(dec_base_r[j].size, dec_base[j].size + 2);
-					if (ni_dec_base_r[j].NTT_scale < 11)
-						ni_dec_base_r[j].NTT_scale = 0;
-					else {
-						ni_dec_base_r[j].load(dec_base_r[j], ni_dec_base_r[j].NTT_scale);
-						ni_dec_base_r[j].NTT();
-					}
+	int i = 63 - std::countl_zero(uint64_t((sv.size() + 18) / 19 - 1));
+	if (dec_base[i + 1] == 0) {
+		int j = 0;
+		do {
+			if (dec_base[j + 1] == 0) {
+				ni_dec_base[j].NTT_scale = get_NTT_scale(dec_base[j].size, dec_base[j].size);
+				sqr_save_NTT_info(dec_base[j + 1], dec_base[j], ni_dec_base[j]);
+				int n_shl = std::countl_zero(dec_base[j][dec_base[j].size - 1]) + 1 & 63;
+				dec_base_r[j] = reciprocal(dec_base[j] << n_shl, dec_base[j].size * 2 + 1);
+				ni_dec_base_r[j].NTT_scale = get_NTT_scale(dec_base_r[j].size, dec_base[j].size + 2);
+				if (ni_dec_base_r[j].NTT_scale < 11)
+					ni_dec_base_r[j].NTT_scale = 0;
+				else {
+					ni_dec_base_r[j].load(dec_base_r[j], ni_dec_base_r[j].NTT_scale);
+					ni_dec_base_r[j].NTT();
 				}
-			} while (++j <= i);
-		}
-		if (i == -1) {
-			*this = uint64_t(0);
-			while (begin != end) {
-				data[0] = data[0] * 10 + *begin - '0';
-				begin++;
 			}
-			return *this;
-		}
-		hi.dec(begin, end - (19ull << i));
-		lo.dec(end - (19ull << i), nullptr, i - 1);
+		} while (++j <= i);
 	}
-	else {
-		if (i == -1) {
-			*this = uint64_t(0);
-			for (int j = 0; j < 19; j++) {
-				data[0] = data[0] * 10 + *begin - '0';
-				begin++;
-			}
-			return *this;
-		}
-		hi.dec(begin, end, i - 1);
-		lo.dec(begin + (19ull << i), end, i - 1);
+	if (i == -1) {
+		*this = 0;
+		for (int i = 0; i < sv.size(); i++)
+			data[0] = data[0] * 10 + sv[i] - '0';
+		return *this;
 	}
+	hi.dec(sv.substr(0, sv.size() - (19ull << i)));
+	lo.dec(sv.substr(sv.size() - (19ull << i)));
 	*this = hi * dec_base[i] + lo;
 	return *this;
 }
@@ -805,9 +794,9 @@ std::istream& operator >>(std::istream& is, natural& n) {
 	std::string s;
 	is >> s;
 	if (is.flags() & std::ios::hex)
-		n.hex(s.c_str());
+		n.hex(s);
 	else if (is.flags() & std::ios::dec)
-		n.dec(s.c_str(), s.c_str() + s.size());
+		n.dec(s);
 	return is;
 }
 
@@ -839,7 +828,7 @@ std::ostream& natural::_print_dec(std::ostream& os, int i, bool is_first)const {
 			lo -= dec_base[i];
 		}
 	}
-	if (is_first && hi == uint64_t(0)) {
+	if (is_first && hi == 0) {
 		lo._print_dec(os, i - 1, 1);
 		return os;
 	}
@@ -865,7 +854,7 @@ std::ostream& operator <<(std::ostream& os, const natural& n) {
 	else if (oldFlags & std::ios::dec) {
 		int i = -1;
 		do {
-			if (dec_base[i + 1] == uint64_t(0)) {
+			if (dec_base[i + 1] == 0) {
 				ni_dec_base[i].NTT_scale = get_NTT_scale(dec_base[i].size, dec_base[i].size);
 				sqr_save_NTT_info(dec_base[i + 1], dec_base[i], ni_dec_base[i]);
 				int n_shl = std::countl_zero(dec_base[i][dec_base[i].size - 1]) + 1 & 63;
