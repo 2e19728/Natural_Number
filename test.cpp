@@ -5,7 +5,8 @@ using namespace std;
 
 int main() {
 
-	cout << pow(natural(2), 65536) << endl;
+//	cout << pow(natural(2), 65536) << endl;
+	cout << format("{}\n", pow(natural(2), 65536));
 	
 /*
 	natural num, den;
@@ -37,4 +38,5 @@ int main() {
 	freopen("factorial_10000000.txt", "w", stdout);
 	cout << f << endl;
 */
+
 }
