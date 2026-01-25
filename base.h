@@ -1,7 +1,7 @@
 #pragma once
 
 #include "asm.h"
-#include <string.h>
+#include <cstring>
 
 //	_Size1 >= _Size2
 int add(uint64_t* _Dst, const uint64_t* _Src1, uint64_t _Size1, const uint64_t* _Src2, uint64_t _Size2) {

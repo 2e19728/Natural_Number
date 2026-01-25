@@ -1,6 +1,6 @@
 #pragma once
 
-#include <stdint.h>
+#include <cstdint>
 
 extern "C" {
 
@@ -59,6 +59,7 @@ extern "C" {
 	//	_R = ceil(pow(2, 124) / _Mod); return _A * _B % _Mod;
 	uint64_t asmMulMod(uint64_t _A, uint64_t _B, uint64_t _Mod, uint64_t _R);
 
-	uint64_t asmSave(const uint64_t* _info_0, const uint64_t* _info_1, const uint64_t* _info_2, uint64_t _Size, uint64_t* _Dst);
+	//	_info_0[] = CRT(_info_0[], _info_1[], _info_2[]);
+	uint64_t asmCRT(uint64_t* _info_0, const uint64_t* _info_1, const uint64_t* _info_2, uint64_t _Size);
 
 }

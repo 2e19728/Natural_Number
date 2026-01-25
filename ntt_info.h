@@ -1,9 +1,12 @@
 #pragma once
 
-#include "basic_natural.h"
 #include "asm.h"
+#include "basic_natural.h"
 
 const uint64_t NTTmul_threshold = 384;
+const uint64_t NTTdiv_threshold = 256;
+const int NTTscale_threshold = 10;
+
 struct NTT_info {
 
 	static const uint64_t mods[3];
@@ -53,9 +56,9 @@ struct NTT_info {
 
 	void mul(const NTT_info&, const NTT_info&);
 
-	uint64_t save(uint64_t*, uint64_t)const;
+	uint64_t CRT(uint64_t);
 
-	void save(basic_natural&, uint64_t)const;
+	void save(basic_natural&, uint64_t);
 
 };
 
@@ -222,16 +225,16 @@ void NTT_info::mul(const NTT_info& ni_a, const NTT_info& ni_b) {
 	}
 }
 
-uint64_t NTT_info::save(uint64_t* _Dst, uint64_t _Size)const {
-	return asmSave(info[0].data, info[1].data, info[2].data, _Size, _Dst);
+uint64_t NTT_info::CRT(uint64_t _Size) {
+	return asmCRT(info[0].data, info[1].data, info[2].data, _Size);
 }
 
-void NTT_info::save(basic_natural& n, uint64_t _Size)const {
-	if (_Size - 1 > 1ull << NTT_scale) {
-		n.resize(1ull << NTT_scale);
-		save(n.data, 1ull << NTT_scale);
-		return;
+void NTT_info::save(basic_natural& n, uint64_t _Size) {
+	if (_Size - 1 > 1ull << NTT_scale)
+		CRT(1ull << NTT_scale);
+	else {
+		info[0].resize(_Size);
+		info[0][_Size - 1] = CRT(_Size - 1);
 	}
-	n.resize(_Size);
-	n[_Size - 1] = save(n.data, _Size - 1);
+	n = std::move(info[0]);
 }

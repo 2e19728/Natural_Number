@@ -2,9 +2,10 @@
 
 #include "asm.h"
 #include "base.h"
-#include "basic_natural.h"
 #include "ntt_info.h"
+#include "basic_natural.h"
 
+#include <queue>
 #include <cctype>
 #include <format>
 #include <string>
@@ -443,7 +444,7 @@ natural& natural::_mul(const natural* ap, const natural* bp) {
 }
 
 void mul_save_NTT_info(natural& d, const natural& a, const natural& b, NTT_info& ni_a) {
-	if (ni_a.NTT_scale < 10) {
+	if (ni_a.NTT_scale < NTTscale_threshold) {
 		d._mul_base(&a, &b);
 		ni_a.NTT_scale = 0;
 	}
@@ -460,7 +461,7 @@ void mul_save_NTT_info(natural& d, const natural& a, const natural& b, NTT_info&
 }
 
 void sqr_save_NTT_info(natural& d, const natural& a, NTT_info& ni_a) {
-	if (ni_a.NTT_scale < 10) {
+	if (ni_a.NTT_scale < NTTscale_threshold) {
 		d._sqr_base(&a);
 		ni_a.NTT_scale = 0;
 	}
@@ -537,27 +538,23 @@ natural pow(const natural& b, uint64_t e) {
 	return p;
 }
 
-std::ostream& operator <<(std::ostream& os, const natural& n);
-
-natural reciprocal(const natural& divs, uint64_t N) {
+natural reciprocal(const natural& divs, uint64_t divd_size) {
+	uint64_t expected_acc = divd_size + 1 - divs.size;
 	natural ans = (1ull << 63 | divs[divs.size - 2] >> 1) + 1;
 	if (ans[0] == 0)
 		ans[0] = 1ull << 63;
 	else
 		ans[0] = asmDiv(0, 1ull << 63, ans[0]);
-	natural tmp;
-	uint64_t acc = N + 1 - divs.size;
 	while (1) {
 		uint64_t nxt_acc = 0, cur_acc = ans.size;
-		if (cur_acc >= acc + 3) {
-			ans >>= cur_acc - acc << 6;
+		if (cur_acc >= expected_acc + 1) {
+			ans >>= cur_acc - expected_acc << 6;
 			return ans;
 		}
 
-		if (divs.size > 2 * cur_acc + 1) {
-			tmp.resize(2 * cur_acc + 1);
-			asmAdd1(tmp.size, divs.data + divs.size - tmp.size, tmp.data, 1);
-		}
+		natural tmp;
+		if (divs.size > 2 * cur_acc + 1)
+			tmp._shr(&divs, divs.size - 2 * cur_acc - 1 << 6);
 		else
 			tmp._shl(&divs, 2 * cur_acc + 1 - divs.size << 6);
 
@@ -569,10 +566,21 @@ natural reciprocal(const natural& divs, uint64_t N) {
 		for (uint64_t i = 0; i < tmp.size; i++)
 			tmp[i] = ~tmp[i + cur_acc];
 		tmp.std();
-		nxt_acc = std::min(cur_acc, 2 * cur_acc - tmp.size + 1) << 1;
-		if (nxt_acc > 1020 && nxt_acc <= 1024)
-			nxt_acc = 1020;
+
+		int l_zero = std::countl_zero(tmp[tmp.size - 1]);
+		if (l_zero < 2)
+			nxt_acc = (2 * cur_acc - tmp.size) * 2;
+		else if (l_zero < 34)
+			nxt_acc = (2 * cur_acc - tmp.size) * 2 + 1;
+		else
+			nxt_acc = (2 * cur_acc - tmp.size) * 2 + 2;
+		nxt_acc = std::min(2 * cur_acc, nxt_acc);
+
+		if (nxt_acc == NTTdiv_threshold)
+			nxt_acc = NTTdiv_threshold - 1;
 		tmp >>= 2 * cur_acc - nxt_acc << 6;
+		if (tmp == 0)
+			tmp = 1;
 
 		mul_load_NTT_info(tmp, ans, tmp, ni_ans);
 
@@ -649,7 +657,6 @@ natural operator%(const natural& a, const natural& b) {
 	return r;
 }
 
-#include <queue>
 natural factorial(uint64_t n) {
 	if (n <= 1)
 		return 1;
@@ -759,7 +766,8 @@ void calc_pi(natural& num, natural& den, natural& numc, uint64_t begin, uint64_t
 	num = num + num1;
 }
 
-natural dec_base[64] = { 10000000000000000000ull }, dec_base_r[64];
+const uint64_t dec_length = 18, dec_base_0 = 1000000000000000000ull;
+natural dec_base[64] = { dec_base_0 }, dec_base_r[64];
 NTT_info ni_dec_base[64], ni_dec_base_r[64];
 
 //	Calculate dec_base[i + 1] dec_base_r[i]
@@ -770,7 +778,7 @@ void calc_dec_base(int i) {
 		int n_shl = std::countl_zero(dec_base[i][dec_base[i].size - 1]) + 1 & 63;
 		dec_base_r[i] = reciprocal(dec_base[i] << n_shl, dec_base[i].size * 2 + 1);
 		ni_dec_base_r[i].NTT_scale = get_NTT_scale(dec_base_r[i].size, dec_base[i].size + 2);
-		if (ni_dec_base_r[i].NTT_scale < 11)
+		if (ni_dec_base_r[i].NTT_scale < NTTscale_threshold)
 			ni_dec_base_r[i].NTT_scale = 0;
 		else {
 			ni_dec_base_r[i].load(dec_base_r[i], ni_dec_base_r[i].NTT_scale);
@@ -780,7 +788,7 @@ void calc_dec_base(int i) {
 }
 
 natural& natural::dec(std::string_view sv) {
-	int i = 63 - std::countl_zero(uint64_t((sv.size() + 18) / 19 - 1));
+	int i = 63 - std::countl_zero(uint64_t((sv.size() + dec_length - 1) / dec_length - 1));
 	if (i == -1) {
 		*this = 0;
 		for (int i = 0; i < sv.size(); i++)
@@ -791,8 +799,8 @@ natural& natural::dec(std::string_view sv) {
 		for (int j = 0; j < i; j++)
 			calc_dec_base(j);
 	natural hi, lo;
-	hi.dec(sv.substr(0, sv.size() - (19ull << i)));
-	lo.dec(sv.substr(sv.size() - (19ull << i)));
+	hi.dec(sv.substr(0, sv.size() - (dec_length << i)));
+	lo.dec(sv.substr(sv.size() - (dec_length << i)));
 	*this = hi * dec_base[i] + lo;
 	return *this;
 }
@@ -809,7 +817,7 @@ std::istream& operator >>(std::istream& is, natural& n) {
 
 void natural::_dec_split(int i, natural& hi, natural& lo)const {
 	if (i == 0)
-		lo = div_base(*this, 10000000000000000000ull, hi);
+		lo = div_base(*this, dec_base_0, hi);
 	else {
 		int n_shl = std::countl_zero(dec_base[i][dec_base[i].size - 1]) + 1 & 63;
 		mul_load_NTT_info(hi, dec_base_r[i], *this >> (dec_base[i].size - 1 << 6), ni_dec_base_r[i]);
@@ -832,7 +840,7 @@ void natural::_print_dec(std::ostream& os, int i, bool is_first)const {
 			os.fill('0');
 		}
 		else {
-			os.width(19);
+			os.width(dec_length);
 			os << data[0];
 		}
 		return;
@@ -853,7 +861,7 @@ void natural::_format_dec(std::format_context& ctx, int i, bool is_first)const {
 		if (is_first)
 			std::format_to(ctx.out(), "{}", data[0]);
 		else
-			std::format_to(ctx.out(), "{:019}", data[0]);
+			std::format_to(ctx.out(), "{:0{}}", data[0], dec_length);
 		return;
 	}
 	natural hi, lo;
