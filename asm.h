@@ -5,16 +5,16 @@
 extern "C" {
 
 	//	_Dst = _Src1 + _Src2; return CF;
-	uint8_t asmAdd0(uint64_t _Size, uint64_t* _Dst, const uint64_t* _Src1, const uint64_t* _Src2);
+	int asmAdd0(uint64_t _Size, uint64_t* _Dst, const uint64_t* _Src1, const uint64_t* _Src2);
 
 	//	_Dst = _Src + CF; return CF; 
-	uint8_t asmAdd1(uint64_t _Size, const uint64_t* _Src, uint64_t* _Dst, uint8_t CF);
+	int asmAdd1(uint64_t _Size, const uint64_t* _Src, uint64_t* _Dst, int CF);
 
 	//	_Dst = _Src1 - _Src2; return CF;
-	uint8_t asmSub0(uint64_t _Size, uint64_t* _Dst, const uint64_t* _Src1, const uint64_t* _Src2);
+	int asmSub0(uint64_t _Size, uint64_t* _Dst, const uint64_t* _Src1, const uint64_t* _Src2);
 
 	//	_Dst = _Src - CF;
-	void asmSub1(uint64_t _Size, const uint64_t* _Src, uint64_t* _Dst, uint8_t CF);
+	int asmSub1(uint64_t _Size, const uint64_t* _Src, uint64_t* _Dst, int CF);
 
 	//	_Dst = _Src << _CL;
 	void asmShl(uint64_t _CL, uint64_t _Size, const uint64_t* _Src, uint64_t* _Dst);
@@ -59,7 +59,7 @@ extern "C" {
 	//	_R = ceil(pow(2, 124) / _Mod); return _A * _B % _Mod;
 	uint64_t asmMulMod(uint64_t _A, uint64_t _B, uint64_t _Mod, uint64_t _R);
 
-	//	_info_0[] = CRT(_info_0[], _info_1[], _info_2[]);
-	uint64_t asmCRT(uint64_t* _info_0, const uint64_t* _info_1, const uint64_t* _info_2, uint64_t _Size);
+	//	[ _info_1[], _info_0[] ] = CRT(_info_0[], _info_1[], _info_2[]);
+	uint64_t asmCRT(uint64_t* _info_0, uint64_t* _info_1, uint64_t* _info_2, uint64_t _Size);
 
 }

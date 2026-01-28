@@ -75,7 +75,11 @@ asmSub1:
 	shl rcx, 3
 	xchg rcx, r8
 	call memcpy
+	xor eax, eax
+	ret
 .L_asmSub1_1:
+	adc ecx, ecx
+	mov eax, ecx
 	ret
 
 global asmShl
@@ -1288,13 +1292,14 @@ asmSave:			; what the F is this
 	push r14
 	push r13
 	push r12
+	push rbp
 	push rbx
 	push rsi
 	push rdi
 	mov r12, r9
-	mov r13, [rsp+60h]
 	xor r14d, r14d
 	xor r15d, r15d
+	mov rbp, rdx
 	mov r9, rdx
 .L_asmSave_0:
 		mov r10, [rcx]
@@ -1352,9 +1357,12 @@ asmSave:			; what the F is this
 		lea r13, [r13+8]
 		dec r12
 		jnz .L_asmSave_0
+	mov [rbp], rax
+	mov [rbp+8], rdx
 	pop rdi
 	pop rsi
 	pop rbx
+	pop rbp
 	pop r12
 	pop r13
 	pop r14

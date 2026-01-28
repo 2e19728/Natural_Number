@@ -10,9 +10,9 @@ int add(uint64_t* _Dst, const uint64_t* _Src1, uint64_t _Size1, const uint64_t* 
 }
 
 //	_Src1 >= _Src2
-void sub(uint64_t* _Dst, const uint64_t* _Src1, uint64_t _Size1, const uint64_t* _Src2, uint64_t _Size2) {
+int sub(uint64_t* _Dst, const uint64_t* _Src1, uint64_t _Size1, const uint64_t* _Src2, uint64_t _Size2) {
 	int cf = asmSub0(_Size2, _Dst, _Src1, _Src2);
-	asmSub1(_Size1 - _Size2, _Src1 + _Size2, _Dst + _Size2, cf);
+	return asmSub1(_Size1 - _Size2, _Src1 + _Size2, _Dst + _Size2, cf);
 }
 
 const uint64_t toom22mul_threshold = 32;

@@ -1,6 +1,6 @@
 #pragma once
 
-#include "asm.h"
+#include "base.h"
 #include "basic_natural.h"
 
 const uint64_t NTTmul_threshold = 384;
@@ -40,10 +40,14 @@ struct NTT_info {
 		root_scale = _NTT_scale;
 	}
 
-	NTT_info() :NTT_scale(0) {}
+	NTT_info(int _NTT_scale = 0) :NTT_scale(_NTT_scale) {}
 
 	NTT_info(const basic_natural& n, int _NTT_scale) {
 		load(n, _NTT_scale);
+	}
+
+	NTT_info(const uint64_t* _Src, uint64_t _Size, int _NTT_scale) {
+		load(_Src, _Size, _NTT_scale);
 	}
 
 	void load(const uint64_t*, uint64_t, int);
@@ -161,7 +165,8 @@ void NTT_info::load(const uint64_t* _Src, uint64_t _Size, int _NTT_scale) {
 				info[i][j] = n0 + n1;
 				info[i][j + N] = n0 - n1 + mods[i];
 			}
-			asmLoad(N + N - _Size, mods_64[i], info[i].data + j, info[i].data + N + j, _Src + j, mods[i]);
+			if (N + N - _Size)
+				asmLoad(N + N - _Size, mods_64[i], info[i].data + j, info[i].data + N + j, _Src + j, mods[i]);
 		}
 	}
 	init(NTT_scale);
@@ -230,8 +235,11 @@ uint64_t NTT_info::CRT(uint64_t _Size) {
 }
 
 void NTT_info::save(basic_natural& n, uint64_t _Size) {
-	if (_Size - 1 > 1ull << NTT_scale)
+	if (_Size - 1 > 1ull << NTT_scale) {
 		CRT(1ull << NTT_scale);
+		int cf = add(info[0].data, info[0].data, info[0].size, info[1].data, 2);
+		asmAdd1(info[0].size, info[0].data, info[0].data, cf);
+	}
 	else {
 		info[0].resize(_Size);
 		info[0][_Size - 1] = CRT(_Size - 1);

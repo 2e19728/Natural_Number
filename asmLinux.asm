@@ -111,7 +111,11 @@ asmSub1:
     call memcpy wrt ..plt
     add rsp, 8
 
+	xor eax, eax
+	ret
 .L_asmSub1_1:
+	adc ecx, ecx
+	mov eax, ecx
 	ret
 
 global asmShl
@@ -1380,6 +1384,7 @@ asmSave:
 	mov r12, r9
 	xor r14d, r14d
 	xor r15d, r15d
+	mov rbp, rdx
 	mov r9, rdx
 .L_asmSave_0:
 		mov r10, [rcx]
@@ -1437,6 +1442,8 @@ asmSave:
 		lea r13, [r13+8]
 		dec r12
 		jnz .L_asmSave_0
+	mov [rbp], rax
+	mov [rbp+8], rdx
 	pop rbx
 	pop rbp
 	pop r12

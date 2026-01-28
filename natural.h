@@ -142,6 +142,42 @@ natural& natural::hex(std::string_view sv) {
 	return *this;
 }
 
+bool operator<(const natural& a, const natural& b) {
+	if (a.size != b.size)
+		return a.size < b.size;
+	uint64_t i = a.size;
+	while (i--)
+		if (a[i] != b[i])
+			return a[i] < b[i];
+	return 0;
+}
+
+bool operator>(const natural& a, const natural& b) {
+	return b < a;
+}
+
+bool operator<=(const natural& a, const natural& b) {
+	return !(b < a);
+}
+
+bool operator>=(const natural& a, const natural& b) {
+	return !(a < b);
+}
+
+bool operator==(const natural& a, const natural& b) {
+	if (a.size != b.size)
+		return 0;
+	uint64_t i = a.size;
+	while (i--)
+		if (a[i] != b[i])
+			return 0;
+	return 1;
+}
+
+bool operator!=(const natural& a, const natural& b) {
+	return !(a == b);
+}
+
 natural& natural::_or(const natural* ap, const natural* bp) {
 	if (ap->size < bp->size)
 		std::swap(ap, bp);
@@ -206,6 +242,10 @@ natural operator&(const natural& a, const natural& b) {
 }
 
 natural& natural::_shl(const natural* ap, uint64_t b) {
+	if (*ap == 0) {
+		*this = 0;
+		return *this;
+	}
 	uint64_t as = ap->size, n = b >> 6;
 	b &= 63;
 	if (b == 0) {
@@ -258,42 +298,6 @@ natural operator>>(const natural& a, uint64_t b) {
 	natural d;
 	d._shr(&a, b);
 	return d;
-}
-
-bool operator<(const natural& a, const natural& b) {
-	if (a.size != b.size)
-		return a.size < b.size;
-	uint64_t i = a.size;
-	while (i--)
-		if (a[i] != b[i])
-			return a[i] < b[i];
-	return 0;
-}
-
-bool operator>(const natural& a, const natural& b) {
-	return b < a;
-}
-
-bool operator<=(const natural& a, const natural& b) {
-	return !(b < a);
-}
-
-bool operator>=(const natural& a, const natural& b) {
-	return !(a < b);
-}
-
-bool operator==(const natural& a, const natural& b) {
-	if (a.size != b.size)
-		return 0;
-	uint64_t i = a.size;
-	while (i--)
-		if (a[i] != b[i])
-			return 0;
-	return 1;
-}
-
-bool operator!=(const natural& a, const natural& b) {
-	return !(a == b);
 }
 
 natural& natural::_add(const natural* ap, const natural* bp) {
@@ -385,6 +389,7 @@ void mul_save_NTT_info(natural&, const natural&, const natural&, NTT_info&);
 void mul_load_NTT_info(natural&, const natural&, const natural&, const NTT_info&);
 
 natural& natural::_mul_NTT(const natural* ap, const natural* bp) {
+//*
 	if (ap->size < bp->size)
 		std::swap(ap, bp);
 	uint64_t a0_size = ap->size + 1 >> 1;
@@ -411,6 +416,7 @@ natural& natural::_mul_NTT(const natural* ap, const natural* bp) {
 	mul_load_NTT_info(a1, *bp, a1, ni_b);
 	*this = (a1 << (a0_size << 6)) + a0;
 	return *this;
+//*/
 /*
 	int NTT_scale = get_NTT_scale(ap->size, bp->size);
 	NTT_info ni_a(*ap, NTT_scale), ni_b(*bp, NTT_scale);
@@ -421,7 +427,7 @@ natural& natural::_mul_NTT(const natural* ap, const natural* bp) {
 	ni_a.save(*this, ap->size + bp->size);
 	std();
 	return *this;
-*/
+//*/
 }
 
 natural& natural::_sqr_NTT(const natural* p) {
@@ -456,6 +462,25 @@ void mul_save_NTT_info(natural& d, const natural& a, const natural& b, NTT_info&
 		ni_b.mul(ni_a, ni_b);
 		ni_b.INTT();
 		ni_b.save(d, a.size + b.size);
+		d.std();
+	}
+}
+
+void mul_save_NTT_info(natural& d, const natural& a, const natural& b, NTT_info& ni_a, NTT_info& ni_b) {
+	if (ni_a.NTT_scale < NTTscale_threshold) {
+		d._mul_base(&a, &b);
+		ni_a.NTT_scale = 0;
+		ni_b.NTT_scale = 0;
+	}
+	else {
+		ni_a.load(a, ni_a.NTT_scale);
+		ni_b.load(b, ni_a.NTT_scale);
+		ni_a.NTT();
+		ni_b.NTT();
+		NTT_info ni;
+		ni.mul(ni_a, ni_b);
+		ni.INTT();
+		ni.save(d, a.size + b.size);
 		d.std();
 	}
 }
@@ -538,6 +563,7 @@ natural pow(const natural& b, uint64_t e) {
 	return p;
 }
 
+//	divs[divs.size - 1] == 1;
 natural reciprocal(const natural& divs, uint64_t divd_size) {
 	uint64_t expected_acc = divd_size + 1 - divs.size;
 	natural ans = (1ull << 63 | divs[divs.size - 2] >> 1) + 1;
@@ -545,6 +571,7 @@ natural reciprocal(const natural& divs, uint64_t divd_size) {
 		ans[0] = 1ull << 63;
 	else
 		ans[0] = asmDiv(0, 1ull << 63, ans[0]);
+
 	while (1) {
 		uint64_t nxt_acc = 0, cur_acc = ans.size;
 		if (cur_acc >= expected_acc + 1) {
@@ -558,8 +585,7 @@ natural reciprocal(const natural& divs, uint64_t divd_size) {
 		else
 			tmp._shl(&divs, 2 * cur_acc + 1 - divs.size << 6);
 
-		NTT_info ni_ans;
-		ni_ans.NTT_scale = get_NTT_scale(tmp.size, 1);
+		NTT_info ni_ans(get_NTT_scale(tmp.size, 1));
 		mul_save_NTT_info(tmp, ans, tmp, ni_ans);
 
 		tmp.resize(tmp.size - cur_acc);
@@ -568,14 +594,7 @@ natural reciprocal(const natural& divs, uint64_t divd_size) {
 		tmp.std();
 
 		int l_zero = std::countl_zero(tmp[tmp.size - 1]);
-		if (l_zero < 2)
-			nxt_acc = (2 * cur_acc - tmp.size) * 2;
-		else if (l_zero < 34)
-			nxt_acc = (2 * cur_acc - tmp.size) * 2 + 1;
-		else
-			nxt_acc = (2 * cur_acc - tmp.size) * 2 + 2;
-		nxt_acc = std::min(2 * cur_acc, nxt_acc);
-
+		nxt_acc = std::min(2 * cur_acc, (2 * cur_acc - tmp.size) * 2 + (l_zero + 31 >> 5));
 		if (nxt_acc == NTTdiv_threshold)
 			nxt_acc = NTTdiv_threshold - 1;
 		tmp >>= 2 * cur_acc - nxt_acc << 6;
@@ -583,7 +602,6 @@ natural reciprocal(const natural& divs, uint64_t divd_size) {
 			tmp = 1;
 
 		mul_load_NTT_info(tmp, ans, tmp, ni_ans);
-
 		ans <<= nxt_acc - cur_acc << 6;
 		add(ans.data, ans.data, ans.size, tmp.data + cur_acc, tmp.size - cur_acc);
 	}
@@ -611,6 +629,175 @@ void div_iterative(const natural& a, const natural& b, natural& q, natural& r) {
 	r = std::move(_r);
 }
 
+natural reciprocal(const natural& divisor, uint64_t dividend_size, NTT_info& ni_divisor) {
+	uint64_t expected_acc = dividend_size + 1 - divisor.size;
+	natural ans = (1ull << 63 | divisor[divisor.size - 2] >> 1) + 1;
+	ans[0] = ans[0] ? asmDiv(0, 1ull << 63, ans[0]) : 1ull << 63;
+	
+	for (uint64_t i = 1; i < divisor.size; i *= 2) {
+		uint64_t prev_acc = ans.size, divisor_seg_size = 2 * prev_acc + 1;
+		if (2 * i >= divisor.size)
+			divisor_seg_size = divisor.size;
+		uint64_t *divisor_seg = divisor.data + divisor.size - divisor_seg_size;
+
+		natural tmp;
+		NTT_info ni_ans;
+		if (2 * i <= NTTdiv_threshold) {
+			tmp.resize(divisor_seg_size + prev_acc);
+			mul_base(tmp.data, divisor_seg, divisor_seg_size, ans.data, prev_acc);
+			tmp.std();
+		}
+		else {
+			int NTT_scale = get_NTT_scale(i, i);
+			ni_ans.load(ans, NTT_scale);
+			ni_divisor.load(divisor_seg, divisor_seg_size, NTT_scale);
+			ni_ans.NTT();
+			ni_divisor.NTT();
+			NTT_info ni_tmp;
+			ni_tmp.mul(ni_ans, ni_divisor);
+			ni_tmp.INTT();
+			ni_tmp.save(tmp, divisor_seg_size + prev_acc);
+			tmp.std();
+		}
+
+		uint64_t n_shl = divisor_seg_size - 1 - prev_acc;
+		while (tmp.size > n_shl + 1 && ~tmp[tmp.size - 1] == 0)
+			tmp.size -= 1;
+		int l_zero = std::countl_zero(~tmp[tmp.size - 1]);
+		uint64_t cur_acc = std::min(2 * prev_acc, (2 * prev_acc - tmp.size + n_shl) * 2 + (l_zero + 31 >> 5));
+		if (cur_acc == NTTdiv_threshold)
+			cur_acc -= 1;
+		n_shl += 2 * prev_acc - cur_acc;
+		if (tmp.size <= n_shl)
+			tmp = 1;
+		else {
+			tmp.resize(tmp.size - n_shl);
+			for (uint64_t i = 0; i < tmp.size; i++)
+				tmp[i] = ~tmp[i + n_shl];
+			tmp.std();
+		}
+
+		mul_load_NTT_info(tmp, ans, tmp, ni_ans);
+
+		tmp >>= prev_acc << 6;
+		uint64_t inc_acc = cur_acc - prev_acc;
+		if (inc_acc >= tmp.size) {
+			memset(tmp.data + tmp.size, 0, sizeof(uint64_t) * (inc_acc - tmp.size));
+			memcpy(tmp.data + inc_acc, ans.data, sizeof(uint64_t) * prev_acc);
+		}
+		else
+			add(tmp.data + inc_acc, ans.data, prev_acc, tmp.data + inc_acc, tmp.size - inc_acc);
+		tmp.resize(cur_acc);
+		ans = std::move(tmp);
+
+		if (cur_acc >= expected_acc + 1) {
+			ans >>= cur_acc - expected_acc << 6;
+			return ans;
+		}
+	}
+	return ans;
+}
+
+void div_iterative2(const natural& divd, const natural& divs, natural& q, natural& r) {
+	int n_shl = std::countl_zero(divs[divs.size - 1]) + 1 & 63;
+	natural b = divs << n_shl;
+	r = divd << n_shl;
+	
+	NTT_info ni_b;
+	natural rec = reciprocal(b, r.size, ni_b);
+	NTT_info ni_rec(get_NTT_scale(rec.size, rec.size));
+	int NTT_scale_b = get_NTT_scale(b.size, 1);
+	uint64_t NTT_size_b = 1ull << NTT_scale_b;
+	if (ni_b.NTT_scale != NTT_scale_b && NTT_scale_b >= NTTscale_threshold - 1) {
+		ni_b.load(b, get_NTT_scale(b.size, 1));
+		ni_b.NTT();
+	}
+	
+	q.resize(r.size - b.size + 1);
+	memset(q.data, 0, sizeof(uint64_t) * q.size);
+
+	natural tmp;
+	int first = 1;
+	if (ni_b.NTT_scale == 0 || 0) {
+		while (r.size > rec.size + b.size - 1) {
+			if (first)
+				mul_save_NTT_info(tmp, rec, r >> (r.size - rec.size << 6), ni_rec);
+			else
+				mul_load_NTT_info(tmp, rec, r >> (r.size - rec.size << 6), ni_rec);
+			
+			first = 0;
+			tmp >>= rec.size << 6;
+			uint64_t idx = r.size - rec.size - b.size + 1;
+			add(q.data + idx, q.data + idx, q.size - idx, tmp.data, tmp.size);
+
+			tmp *= b;
+			sub(r.data + idx, r.data + idx, r.size - idx, tmp.data, tmp.size);
+			r.std();
+		}
+
+		if (first)
+			mul_save_NTT_info(tmp, rec, r >> (b.size - 1 << 6), ni_rec);
+		else
+			mul_load_NTT_info(tmp, rec, r >> (b.size - 1 << 6), ni_rec);
+
+		tmp >>= rec.size << 6;
+		q += tmp;
+		tmp *= b;
+		r -= tmp;
+	}
+	else {
+		while (r.size > rec.size + b.size - 1) {
+			if (first)
+				mul_save_NTT_info(tmp, rec, r >> (r.size - rec.size << 6), ni_rec);
+			else
+				mul_load_NTT_info(tmp, rec, r >> (r.size - rec.size << 6), ni_rec);
+			
+			first = 0;
+			tmp >>= rec.size << 6;
+			uint64_t idx = r.size - rec.size - b.size + 1;
+			add(q.data + idx, q.data + idx, q.size - idx, tmp.data, tmp.size);
+
+			mul_load_NTT_info(tmp, b, tmp, ni_b);
+			sub(r.data + idx, r.data + idx, r.size - idx, tmp.data, tmp.size);
+			r.std();
+			
+			if (r.size - idx > NTT_size_b) {
+				int cf = add(r.data + idx, r.data + idx, NTT_size_b, r.data + idx + NTT_size_b, r.size - idx - NTT_size_b);
+				asmAdd1(NTT_size_b, r.data + idx, r.data + idx, cf);
+				r.resize(idx + NTT_size_b);
+			}
+			if (r.size == idx + NTT_size_b && r[r.size - 1] >> 63)
+				r.resize(idx);
+			r.std();
+		}
+
+		if (first)
+			mul_save_NTT_info(tmp, rec, r >> (b.size - 1 << 6), ni_rec);
+		else
+			mul_load_NTT_info(tmp, rec, r >> (b.size - 1 << 6), ni_rec);
+
+		tmp >>= rec.size << 6;
+		q += tmp;
+		mul_load_NTT_info(tmp, b, tmp, ni_b);
+		r -= tmp;
+
+		if (r.size > NTT_size_b) {
+			int cf = add(r.data, r.data, NTT_size_b, r.data + NTT_size_b, r.size - NTT_size_b);
+			asmAdd1(NTT_size_b, r.data, r.data, cf);
+			r.resize(NTT_size_b);
+		}
+		if (r.size == NTT_size_b && r[r.size - 1] >> 63)
+			r = 0;
+		r.std();
+	}
+
+	while (r >= b) {
+		q += 1;
+		r -= b;
+	}
+	r >>= n_shl;
+}
+
 natural& natural::_div(const natural* ap, const natural* bp, natural* r) {
 	if (*bp == 0) {
 		if (*ap == 0)
@@ -629,7 +816,7 @@ natural& natural::_div(const natural* ap, const natural* bp, natural* r) {
 		*r = div_base(*ap, (*bp)[0], *this);
 		return *this;
 	}
-	div_iterative(*ap, *bp, *this, *r);
+	div_iterative2(*ap, *bp, *this, *r);
 	return *this;
 }
 
@@ -766,7 +953,7 @@ void calc_pi(natural& num, natural& den, natural& numc, uint64_t begin, uint64_t
 	num = num + num1;
 }
 
-const uint64_t dec_length = 18, dec_base_0 = 1000000000000000000ull;
+const uint64_t dec_length = 18, dec_base_0 = 1'000'000'000'000'000'000ull;
 natural dec_base[64] = { dec_base_0 }, dec_base_r[64];
 NTT_info ni_dec_base[64], ni_dec_base_r[64];
 
