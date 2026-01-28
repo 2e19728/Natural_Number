@@ -629,7 +629,7 @@ void div_iterative(const natural& a, const natural& b, natural& q, natural& r) {
 	r = std::move(_r);
 }
 
-natural reciprocal(const natural& divisor, uint64_t dividend_size, NTT_info& ni_divisor) {
+natural reciprocal2(const natural& divisor, uint64_t dividend_size, NTT_info& ni_divisor) {
 	uint64_t expected_acc = dividend_size + 1 - divisor.size;
 	natural ans = (1ull << 63 | divisor[divisor.size - 2] >> 1) + 1;
 	ans[0] = ans[0] ? asmDiv(0, 1ull << 63, ans[0]) : 1ull << 63;
@@ -704,7 +704,7 @@ void div_iterative2(const natural& divd, const natural& divs, natural& q, natura
 	r = divd << n_shl;
 	
 	NTT_info ni_b;
-	natural rec = reciprocal(b, r.size, ni_b);
+	natural rec = reciprocal2(b, r.size, ni_b);
 	NTT_info ni_rec(get_NTT_scale(rec.size, rec.size));
 	int NTT_scale_b = get_NTT_scale(b.size, 1);
 	uint64_t NTT_size_b = 1ull << NTT_scale_b;

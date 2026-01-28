@@ -1286,8 +1286,8 @@ asmNttMul2:
 	pop r15
 	ret
 
-global asmSave
-asmSave:			; what the F is this
+global asmCRT
+asmCRT:			; what the F is this
 	push r15
 	push r14
 	push r13
@@ -1301,62 +1301,60 @@ asmSave:			; what the F is this
 	xor r15d, r15d
 	mov rbp, rdx
 	mov r9, rdx
-.L_asmSave_0:
+.L_asmCRT_0:
 		mov r10, [rcx]
-		mov r11, 5700000000000001h	; m2
 		mov rbx, [r8]
+		mov r13, [r9]
+		mov r11, 5700000000000001h	; m2
 		sub rbx, r10
 		add rbx, r11
 		mov rax, 599999999999999eh	; m0^-1/m2
 		mul rbx
-		mov rax, 1e73333333333335h	; m0^-1
-		imul rbx, rax
+		mov rsi, 1e73333333333335h	; m0^-1
+		imul rbx, rsi
 		imul rdx, r11
 		sub rbx, rdx
-		lea rax, [rbx+r11]
-		cmovs rbx, rax
+		lea rdx, [rbx+r11]
+		cmovns rdx, rbx
+		mov rbx, 1b00000000000001h	; m0
 		mov r11, 3a00000000000001h	; m1
-		mov rax, 1b00000000000001h	; m0
-		mul rbx
-		mov rsi, rax
-		mov rdi, rdx
 		mov rax, 772c234f72c234fah	; m0/m1
-		mul rbx
+		mulx rdi, rsi, rbx
+		mul rdx
 		lea rbx, [rdx+2]
 		imul rbx, r11
-		sub rbx, rsi
-		add rbx, [r9]
-		sub rbx, r10
+		sub r13, rsi
+		sub r13, r10
+		add rbx, r13
 		mov rax, 5294a5294a529495h	; m0m2^-1/m1
 		mul rbx
 		mov rax, 12b5ad6b5ad6b5aah	; m0m2^-1
 		imul rbx, rax
 		imul rdx, r11
 		sub rbx, rdx
-		lea rax, [rbx+r11]
-		cmovs rbx, rax
+		lea rdx, [rbx+r11]
+		cmovns rdx, rbx
 		add rsi, r10
 		adc rdi, 0
-		mov rax, 7200000000000001h	; m0m2_low
-		mul rbx
-		add rsi, rax
-		adc rdi, rdx
+		mov rbx, 7200000000000001h	; m0m2_low
 		mov rax, 92d000000000000h	; m0m2_high
-		mul rbx
+		mulx r11, r10, rbx
+		mul rdx
+		add rsi, r10
+		adc rdi, r11
 		add rax, rdi
 		adc rdx, 0
 		add rsi, r14
 		adc rax, r15
 		adc rdx, 0
-		mov [r13], rsi
+		mov [rcx], rsi
 		mov r14, rax
 		mov r15, rdx
 		lea rcx, [rcx+8]
 		lea r8, [r8+8]
 		lea r9, [r9+8]
-		lea r13, [r13+8]
 		dec r12
-		jnz .L_asmSave_0
+		jnz .L_asmCRT_0
 	mov [rbp], rax
 	mov [rbp+8], rdx
 	pop rdi

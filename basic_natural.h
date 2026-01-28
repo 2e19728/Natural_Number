@@ -53,8 +53,6 @@ struct basic_natural {
 
 	basic_natural& operator=(basic_natural&&) noexcept;
 
-	void alloc(uint64_t);
-
 	void resize(uint64_t);
 
 	uint64_t& operator[](uint64_t);
@@ -80,17 +78,14 @@ basic_natural& basic_natural::operator=(basic_natural&& n) noexcept{
 	return *this;
 }
 
-void basic_natural::alloc(uint64_t s) {
+void basic_natural::resize(uint64_t s) {
+	size = s;
 	if (capacity < s) {
 		capacity = std::bit_ceil(s);
 		data = (uint64_t*)realloc(data, capacity * sizeof(uint64_t));
 		if (data == nullptr)
 			exit(0xc0000005);
 	}
-}
-
-void basic_natural::resize(uint64_t s) {
-	alloc(size = s);
 }
 
 uint64_t& basic_natural::operator[](uint64_t idx) {
