@@ -1,42 +1,286 @@
-﻿#include <iostream>
+// test.cpp - self-checking test suite for the natural big-integer library.
+//
+//	./test                 correctness suite only (default, a few seconds)
+//	./test bench [limbs]   multiplication / squaring throughput (default up to 2^20 limbs)
+//	./test all [limbs]     both
+//
+// Everything is checked against an independent oracle, so a green run is meaningful
+// without any external library:
+//
+//	* a plain O(n*m) schoolbook multiplication written here in unsigned __int128
+//	  (ref_mul below) pins down the assembly base case and the Toom-22 recursion;
+//	* the three multiply paths - base case (_mul_base), NTT (_mul_NTT) and the planner
+//	  that chooses between them (operator*) - must agree limb for limb;
+//	* the square (sqr / _sqr_base / _sqr_NTT) must agree with a * a;
+//	* the wrap-corrected "one size shorter" product must agree with ntt_wrap_enable
+//	  turned off, over the sawtooth band where the planner prefers it;
+//	* division must invert multiplication: (a/b)*b + a%b == a, (a*b)/b == a;
+//	* shifts, add/sub and hex/decimal round trips.
+//
+// Build: see compile.sh (g++ -masm=intel -march=native -std=c++20 -O3 mul_basecase.s
+//        mul_ntt.s test.cpp -o test).
+
 #include "natural.h"
-#include <time.h>
-using namespace std;
 
-int main() {
+#include <chrono>
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
+#include <format>
+#include <string>
+#include <vector>
 
-//	cout << pow(natural(2), 65536) << endl;
-	cout << format("{}\n", pow(natural(2), 65536));
-	
-/*
-	natural num, den;
-	clock_t t = clock();
-	calc_e(num, den, 0, 1ull << 21);
-	num *= pow(natural(10), 10000000);
-	num /= den;
-	cerr << clock() - t << endl;
-	freopen("e_10000000.txt", "w", stdout);
-	cout << num << endl;
-*/
-/*
-	natural num, den, numc, denc;
-	clock_t t = clock();
-	calc_pi(num, den, numc, 1, 1ull << 20 | 1);
-	sqrt_10005(numc, denc, 600000);
-	num = 0xcf6371 * den - num;
-	den *= 0x68380 * numc * pow(natural(10), 10000000);
-	num *= denc;
-	den /= num;
-	cerr << clock() - t << endl;
-	freopen("pi_10000000_new.txt", "w", stdout);
-	cout << den << endl;
-*/
-/*
-	clock_t t = clock();
-	natural f = factorial(10000000);
-	cerr << clock() - t << endl;
-	freopen("factorial_10000000.txt", "w", stdout);
-	cout << f << endl;
-*/
+// ------------------------------------------------------------------ test harness
+static int g_checks = 0, g_fails = 0;
+static const char* g_group = "";
 
+static void group(const char* name) {
+	g_group = name;
+	std::printf("  %-34s", name);
+}
+static void check(bool ok, const char* what) {
+	g_checks++;
+	if (!ok) {
+		g_fails++;
+		std::printf("\n    FAIL: %s [%s]\n", what, g_group);
+	}
+}
+static void done() {
+	std::printf(" ok\n");
+}
+
+// ------------------------------------------------------------------ helpers
+static uint64_t rs = 0x9e3779b97f4a7c15ull;
+static uint64_t rnd() { rs ^= rs << 13; rs ^= rs >> 7; rs ^= rs << 17; return rs; }
+
+// n-limb natural with a reproducible random pattern.
+//   pat 0 random   1 all-ones   2 alternating   3 top half zero
+//   4 single limb in the middle  5 0x8000..   6 small (only the lowest limb set)
+static natural rnat(uint64_t n, int pat = 0) {
+	natural a;
+	a.resize(n);
+	for (uint64_t i = 0; i < n; i++) a[i] = rnd();
+	if (pat == 1) for (uint64_t i = 0; i < n; i++) a[i] = ~0ull;
+	if (pat == 2) for (uint64_t i = 0; i < n; i++) a[i] = (i & 1) ? 0 : ~0ull;
+	if (pat == 3) for (uint64_t i = (n + 1) / 2; i < n; i++) a[i] = 0;
+	if (pat == 4) { for (uint64_t i = 0; i < n; i++) a[i] = 0; a[n / 2] = ~0ull; }
+	if (pat == 5) for (uint64_t i = 0; i < n; i++) a[i] = 1ull << 63;
+	if (pat == 6) for (uint64_t i = 1; i < n; i++) a[i] = 0;
+	a.std();
+	return a;
+}
+
+// Independent schoolbook reference: O(n*m) with 128-bit accumulation, no asm involved.
+static std::vector<uint64_t> ref_mul(const natural& a, const natural& b) {
+	std::vector<uint64_t> c(a.size + b.size, 0);
+	for (uint64_t i = 0; i < a.size; i++) {
+		uint64_t carry = 0;
+		for (uint64_t j = 0; j < b.size; j++) {
+			unsigned __int128 t = (unsigned __int128)a[i] * b[j] + c[i + j] + carry;
+			c[i + j] = (uint64_t)t;
+			carry = (uint64_t)(t >> 64);
+		}
+		c[i + b.size] = carry;
+	}
+	return c;
+}
+
+// does the natural's limbs equal the reference vector, ignoring leading zeros?
+static bool same(const natural& got, const std::vector<uint64_t>& want) {
+	uint64_t n = want.size();
+	while (n > 1 && want[n - 1] == 0) n--;
+	if (got.size != n) return false;
+	return std::memcmp(got.data, want.data(), sizeof(uint64_t) * n) == 0;
+}
+
+// ------------------------------------------------------------------ groups
+static void t_parse_format() {
+	group("parse / format round trip");
+	const char* vals[] = { "0", "1", "2", "0xffffffffffffffff", "0x10000000000000000",
+		"0xffffffffffffffffffffffffffffffff", "340282366920938463463374607431768211455",
+		"12345678901234567890123456789012345678901234567890",
+		"0x123456789abcdef0123456789abcdef0" };
+	for (const char* v : vals) {
+		natural x{ std::string_view(v) };
+		check(natural(std::format("{}", x)) == x, "decimal round trip");
+		check(natural(std::format("0x{:x}", x)) == x, "hex round trip");
+	}
+	for (int i = 0; i < 40; i++) {
+		natural x = rnat(1 + rnd() % 600);
+		check(natural(std::format("{}", x)) == x, "random decimal round trip");
+		check(natural(std::format("0x{:x}", x)) == x, "random hex round trip");
+	}
+	done();
+}
+
+static void t_add_sub_shift() {
+	group("add / sub / shift identities");
+	for (int i = 0; i < 120; i++) {
+		natural a = rnat(1 + rnd() % 700), b = rnat(1 + rnd() % 700);
+		check((a + b) - b == a, "(a+b)-b == a");
+		check((a + b) - a == b, "(a+b)-a == b");
+		check(a - a == natural(0), "a-a == 0");
+		uint64_t k = rnd() % 200;
+		check((a << k) >> k == a, "(a<<k)>>k == a");
+		check((a << k) == a * (natural(1) << k), "a<<k == a*2^k");
+	}
+	done();
+}
+
+static void t_mul_reference() {
+	group("multiply vs 128-bit reference");
+	for (uint64_t n = 1; n <= 40; n++)
+		for (uint64_t m : { 1ull, 2ull, 3ull, 7ull, 17ull, 40ull })
+			for (int pat = 0; pat < 4; pat++) {
+				natural a = rnat(n, pat), b = rnat(m, pat);
+				natural p = a * b;
+				check(same(p, ref_mul(a, b)), "planner product vs reference");
+				natural q;
+				q._mul_base(&a, &b);
+				check(q == p, "_mul_base vs planner");
+			}
+	for (uint64_t n : { 64ull, 100ull, 127ull, 128ull, 200ull })
+		for (uint64_t m : { 1ull, 2ull, 3ull, 17ull, 63ull }) {
+			natural a = rnat(n), b = rnat(m);
+			check(same(a * b, ref_mul(a, b)), "larger product vs reference");
+		}
+	done();
+}
+
+static void t_mul_paths() {
+	group("multiply paths agree (base / NTT)");
+	for (uint64_t n : { 24ull, 25ull, 100ull, 200ull, 448ull, 896ull, 897ull, 1000ull, 1500ull,
+			2048ull, 3000ull, 4096ull })
+		for (uint64_t m : { 24ull, 25ull, 100ull, 400ull, 896ull, 1000ull }) {
+			if (m > n) continue;
+			natural a = rnat(n), b = rnat(m);
+			natural p = a * b, q;
+			q._mul_base(&a, &b);
+			check(q == p, "_mul_base == planner");
+			q._mul_NTT(&a, &b);
+			check(q == p, "_mul_NTT == planner");
+		}
+	done();
+}
+
+static void t_sqr() {
+	group("square (vs a*a, base / NTT, in-place)");
+	for (uint64_t n : { 1ull, 2ull, 3ull, 5ull, 23ull, 24ull, 25ull, 36ull, 37ull, 38ull, 47ull,
+			48ull, 100ull, 400ull, 895ull, 896ull, 897ull, 1000ull, 2048ull, 4096ull })
+		for (int pat = 0; pat < 4; pat++) {
+			natural a = rnat(n, pat);
+			natural s = sqr(a);
+			check(s == a * a, "sqr(a) == a*a");
+			natural b;
+			b._sqr_base(&a);
+			check(b == s, "_sqr_base == sqr");
+			if (n >= 24) {
+				b._sqr_NTT(&a);
+				check(b == s, "_sqr_NTT == sqr");
+			}
+			natural c = a;
+			c._sqr(&c);
+			check(c == s, "in-place square");
+		}
+	done();
+}
+
+static void t_wrap() {
+	group("wrap-corrected path vs plain");
+	// shapes the planner picks wrap for: just above a power of two
+	for (uint64_t n : { 1026ull, 1050ull, 1100ull, 1150ull, 1200ull, 2052ull, 2100ull, 2200ull,
+			2400ull, 4104ull, 4400ull, 5000ull, 8200ull, 9000ull }) {
+		natural a = rnat(n), b = rnat(n - 100);
+		ntt_wrap_enable = true;
+		natural p = a * b;
+		ntt_wrap_enable = false;
+		natural q = a * b;
+		ntt_wrap_enable = true;
+		check(p == q, "wrap product == version_1 schedule");
+	}
+	done();
+}
+
+static void t_div() {
+	group("division inverts multiplication");
+	for (int i = 0; i < 60; i++) {
+		uint64_t n = 1 + rnd() % 400;
+		natural a = rnat(n), b = rnat(1 + rnd() % n);
+		natural q = a / b, r = a % b;
+		check(q * b + r == a, "(a/b)*b + a%b == a");
+		check(r < b, "a%b < b");
+		natural p = a * b;
+		check(p / b == a, "(a*b)/b == a");
+		check(p % b == natural(0), "(a*b)%b == 0");
+	}
+	for (uint64_t n : { 1ull, 2ull, 63ull, 64ull, 65ull, 511ull, 512ull, 513ull, 896ull, 900ull }) {
+		natural a = rnat(n + 200), b = rnat(n);
+		natural q = a / b, r = a % b;
+		check(q * b + r == a, "larger division identity");
+	}
+	done();
+}
+
+static void t_patterns() {
+	group("carry stress patterns");
+	const uint64_t sizes[] = { 3, 4, 5, 8, 23, 24, 25, 37, 48, 64, 127, 128, 129, 256, 512, 1000 };
+	for (uint64_t n : sizes)
+		for (int pat = 0; pat < 7; pat++) {
+			natural a = rnat(n, pat);
+			natural p = a * a, q;
+			check(sqr(a) == p, "sqr == mul for the pattern");
+			q._mul_base(&a, &a);
+			check(q == p, "base == planner for the pattern");
+			if (n <= 64)                       // reference stays cheap for small operands
+				check(same(p, ref_mul(a, a)), "pattern vs 128-bit reference");
+		}
+	done();
+}
+
+// ------------------------------------------------------------------ benchmark
+static void bench(uint64_t max_limbs) {
+	std::printf("\n%10s %12s %12s %12s %10s %10s\n",
+		"limbs", "bits", "mul_ms", "sqr_ms", "mul_MiB/s", "sqr_MiB/s");
+	for (uint64_t n = 1ull << 14; n <= max_limbs; n <<= 1) {
+		natural a = rnat(n), b = rnat(n), d;
+		auto time_it = [&](auto&& f) {
+			double best = 1e300;
+			for (int r = 0; r < 3; r++) {
+				auto t0 = std::chrono::steady_clock::now();
+				f();
+				auto t1 = std::chrono::steady_clock::now();
+				double ms = std::chrono::duration<double, std::milli>(t1 - t0).count();
+				if (ms < best) best = ms;
+			}
+			return best;
+		};
+		double tm = time_it([&] { d = a * b; });
+		double ts = time_it([&] { d = sqr(a); });
+		double bytes = 2.0 * (double)n * 8.0;               // operand bytes moved per product
+		std::printf("%10llu %12llu %12.3f %12.3f %10.1f %10.1f\n",
+			(unsigned long long)n, (unsigned long long)(n * 64), tm, ts,
+			bytes / (tm * 1e-3) / (1 << 20), bytes / (ts * 1e-3) / (1 << 20));
+	}
+}
+
+int main(int argc, char** argv) {
+	setbuf(stdout, NULL);
+	std::string mode = argc > 1 ? argv[1] : "check";
+	uint64_t max_limbs = argc > 2 ? std::strtoull(argv[2], nullptr, 0) : (1ull << 20);
+	if (mode == "check" || mode == "all") {
+		std::printf("natural self-check\n");
+		t_parse_format();
+		t_add_sub_shift();
+		t_mul_reference();
+		t_mul_paths();
+		t_sqr();
+		t_wrap();
+		t_div();
+		t_patterns();
+		std::printf("\n%d checks, %d failures\n", g_checks, g_fails);
+		std::printf("%s\n", g_fails ? "FAILED" : "ALL OK");
+	}
+	if (mode == "bench" || mode == "all")
+		bench(max_limbs);
+	return g_fails != 0;
 }

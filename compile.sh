@@ -1,0 +1,1 @@
+g++ -masm=intel -march=native -std=c++20 -O3 mul_basecase.s mul_ntt.s test.cpp -o test
