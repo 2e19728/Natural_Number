@@ -1,0 +1,11 @@
+# Matches the existing hand-written style; only C++ sources, the assembly is not touched.
+BasedOnStyle: LLVM
+UseTab: Always
+IndentWidth: 4
+TabWidth: 4
+ColumnLimit: 110
+BreakBeforeBraces: Attach
+AllowShortFunctionsOnASingleLine: None
+AllowShortIfStatementsOnASingleLine: false
+PointerAlignment: Left
+SortIncludes: false

@@ -1,0 +1,25 @@
+# build trees ---------------------------------------------------------------
+build/
+build-*/
+cmake-build-*/
+CMakeCache.txt
+CMakeFiles/
+*.o
+*.a
+*.so
+*.dylib
+*.exe
+compile_commands.json
+
+# the quick-build outputs from the Makefile ---------------------------------
+/natural_test
+/natural_bench
+/natural_example
+
+# editor / OS ---------------------------------------------------------------
+.vscode/
+.idea/
+*.swp
+*~
+.DS_Store
+Thumbs.db
