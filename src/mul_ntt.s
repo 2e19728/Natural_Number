@@ -863,7 +863,10 @@ nat_asmNttMul:
 #   * the two `mul rdx` steps (which clobber rdx and showed up as a loop-carried
 #     dependency in -timeline) became mulx,
 #   * two coefficients per iteration: the per-coefficient CRT maths are independent, only
-#     the two-word carry is serial, so the scheduler gets two chains to overlap.
+#     the two-word carry is serial, so the scheduler gets two chains to overlap,
+#   * three of the five constant loads are folded into the multiply that consumes them
+#     (imul/mulx take a memory operand, so the mov disappears); the two `mul`s cannot be
+#     folded because their multiplicand is fixed to rax, and m1 serves two multiplies.
 # Registers: rcx=info0 rbp=info1(base) r8=info2 r9=info1 r11=modulus-in-use
 #            r14:r15=carry  temps: rax rbx rdx rsi rdi r10 r13.
 
@@ -874,17 +877,15 @@ nat_asmNttMul:
 	mov	r11, [rip + .Lcrt_m2]
 	sub	rbx, r10			# r2 - r0
 	add	rbx, r11			# + m2   (positive representative)
-	mov	rax, [rip + .Lcrt_cm2]
+	mov	rax, [rip + .Lcrt_cm2]		# mul's multiplicand is fixed to rax: cannot fold
 	mul	rbx				# rdx = high(v * CM2)
-	mov	rsi, [rip + .Lcrt_inv0_2]
-	imul	rbx, rsi			# low(v * inv0_2)
+	imul	rbx, [rip + .Lcrt_inv0_2]	# low(v * inv0_2)          [load folded in]
 	imul	rdx, r11			# q * m2
 	sub	rbx, rdx
 	lea	rdx, [rbx+r11]
 	cmovns	rdx, rbx			# rdx = w2
-	mov	rbx, [rip + .Lcrt_m0]
 	mov	r11, [rip + .Lcrt_m1]
-	mulx	rdi, rsi, rbx			# rdi:rsi = u = m0 * w2
+	mulx	rdi, rsi, [rip + .Lcrt_m0]	# rdi:rsi = u = m0 * w2    [load folded in]
 	mulx	rbx, rax, [rip + .Lcrt_cm1]	# rbx = high(w2 * CM1)
 	add	rbx, 2
 	imul	rbx, r11			# (q + 2) * m1
@@ -901,8 +902,7 @@ nat_asmNttMul:
 	cmovns	rdx, rbx			# rdx = t
 	add	rsi, r10
 	adc	rdi, 0				# rdi:rsi = u + r0
-	mov	r13, [rip + .Lcrt_m0m2_lo]
-	mulx	r11, r10, r13			# r11:r10 = t * (m0*m2)_low
+	mulx	r11, r10, [rip + .Lcrt_m0m2_lo]	# r11:r10 = t * (m0*m2)_low [load folded in]
 	mulx	r13, rax, [rip + .Lcrt_m0m2_hi]	# r13:rax = t * (m0*m2)_high   (rdx = t still)
 	add	rsi, r10
 	adc	rdi, r11
