@@ -361,17 +361,20 @@ nat_asmINtt_\P\()_radix2:
 #   [b0 d0 b1 d1]  (gather 2)  x  [a0 c0 a1 c1]   inner layer, twiddles 2-lane interleaved
 #   [a0 b0 c0 d0], [a1 b1 c1 d1]  (restore)       store back in memory order
 #
-# The twiddle vectors come straight out of the root table, which stores (w, w') pairs: one
-# vpshufd with 0x44 duplicates every w of a 128-bit lane, 0xEE every w'.  The inner layer
-# wants [w2_0 w2_0 w3_0 w3_0 w2_1 w2_1 w3_1 w3_1] and 0x44 produces exactly that; the outer
-# wants 4-lane groups, so one vshufi64x2 (lanes 0,0,1,1) follows.  No mask register is needed
-# and the block-0 twiddle (1) needs no special case: S56 with w = 1 reproduces the
-# multiply-free butterfly, which is why the generic scalar kernel and nat_asmNtt_radix4 agree
-# on block 0 too.
+# The twiddle vectors come straight out of the root table, which stores (w, w') pairs.  The
+# outer layer wants one twiddle per block, i.e. [w0 x4, w1 x4]: a full vpbroadcastq of w1 and
+# then the same broadcast of w0 under k4 = 0x0f, which fills the low four lanes and leaves the
+# high half alone -- four broadcasts in all, no cross-lane shuffle and no 64-byte load for
+# data it does not use.  The inner layer wants [w2_0 x2, w3_0 x2, w2_1 x2, w3_1 x2], i.e. every
+# w of a pair duplicated; that is a register vpshufd with 0x44 (0xee for the w' vector) on the
+# single 64-byte load of the four pairs the iteration consumes.  The block-0 twiddle (1) needs
+# no special case: S56 with w = 1 reproduces the multiply-free butterfly, which is why the
+# generic scalar kernel and nat_asmNtt_radix4 agree on block 0 too.
 #
 # Register map: R0/R1,R3/R4/R5 outer then inner lo/hi pairs, R2/R6 Z, R8/R9 loads,
 #   R10/R19/R27 staging, R11..R15/R26 permutation indices (set once), R16..R18 S56 scratch,
-#   R20..R22 outer w/w'/w'>>52, R23..R25 inner, R28 m, R29 sign, R30 a<<16.
+#   R20..R22 outer w/w'/w'>>52, R23..R25 inner, R28 m, R29 sign, R30 a<<16, k4 = 0x0f (the
+#   outer broadcast mask, set once; S56 and RED own k1 and k2).
 # The loop steps 128 bytes = 16 elements; the schedule's smallest level chunk is 2^4, so a
 # span is always a multiple of 16.
 	.globl	nat_asmNtt_zmm_radix4_d2
@@ -390,6 +393,8 @@ nat_asmNtt_zmm_radix4_d2:
 	shr	rax, 56
 	shl	rax, 16
 	vpbroadcastq	zmm30, rax		# a<<16
+	mov	eax, 0x0f
+	kmovw	k4, eax			# the outer layer's low-half broadcast mask
 	vmovdqa64	zmm11, [rip + .Ld2_i0]
 	vmovdqa64	zmm12, [rip + .Ld2_i1]
 	vmovdqa64	zmm13, [rip + .Ld2_i2]
@@ -397,13 +402,14 @@ nat_asmNtt_zmm_radix4_d2:
 	vmovdqa64	zmm15, [rip + .Ld2_i4]
 	vmovdqa64	zmm26, [rip + .Ld2_i5]
 .Ld2_loop:
-	vpshufd		zmm20, [rbx], 0x44	# every w of a (w, w') pair, duplicated
-	vshufi64x2	zmm20, zmm20, zmm20, 0x50	# -> [w0 x4, w1 x4]
-	vpshufd		zmm21, [rbx], 0xee	# the reciprocals
-	vshufi64x2	zmm21, zmm21, zmm21, 0x50
+	vpbroadcastq	zmm20, [rbx+16]		# w1 x4 in the high half, then w0 x4 under k4
+	vpbroadcastq	zmm20{k4}, [rbx]
+	vpbroadcastq	zmm21, [rbx+24]		# the same for the reciprocals
+	vpbroadcastq	zmm21{k4}, [rbx+8]
 	vpsrlq		zmm22, zmm21, 52
-	vpshufd		zmm23, [rsi], 0x44	# [w2_0 x2, w3_0 x2, w2_1 x2, w3_1 x2]
-	vpshufd		zmm24, [rsi], 0xee
+	vmovdqu64	zmm24, [rsi]		# the (w, w') pairs of both inner twiddles
+	vpshufd		zmm23, zmm24, 0x44	# [w2_0 x2, w3_0 x2, w2_1 x2, w3_1 x2]
+	vpshufd		zmm24, zmm24, 0xee	# and their reciprocals
 	vpsrlq		zmm25, zmm24, 52
 	vmovdqu64	zmm8, [r8]		# block 0, elements 0..7
 	vmovdqu64	zmm9, [r8+64]		# block 1, elements 8..15
@@ -458,10 +464,13 @@ nat_asmNtt_zmm_radix4_d2:
 #                the partner over: s = V + P, x = P - V + m, then a masked move (0xCC) puts the
 #                S56 result (c2, d2) at the c/d slots and red(s) (a2, b2) at the a/b slots.
 #   The outer twiddle is one broadcast per block -- the pair members share w -- and the inner
-#   one is the same 2-lane-interleaved [w2_0 w3_0 w2_1 w3_1] pattern the forward uses, so the
-#   vpshufd twiddle construction is reused verbatim.
+#   one is the same 2-lane-interleaved [w2_0 w3_0 w2_1 w3_1] pattern the forward uses, so both
+#   twiddle vectors are built exactly as in the forward kernel: four vpbroadcastq for the
+#   outer one (the second pair of each under k4 = 0x0f) and one 64-byte load plus two register
+#   vpshufd for the inner one.
 #
-# Registers as in the forward kernel; k3 (0xCC) is set once outside the loop.
+# Registers as in the forward kernel; k3 (0xCC, the outer blend) and k4 (0x0f, the outer
+# broadcast) are set once outside the loop.
 	.globl	nat_asmINtt_zmm_radix4_d2
 nat_asmINtt_zmm_radix4_d2:
 	push	rbx
@@ -479,19 +488,22 @@ nat_asmINtt_zmm_radix4_d2:
 	shl	rax, 16
 	vpbroadcastq	zmm30, rax		# a<<16
 	mov	eax, 0xcc
-	kmovw	k3, eax
+	kmovw	k3, eax			# the outer blend: keep red(s), take Shoup at c/d
+	mov	eax, 0x0f
+	kmovw	k4, eax			# the outer broadcast mask
 	vmovdqa64	zmm11, [rip + .Ld2_iA]	# [a,c]
 	vmovdqa64	zmm12, [rip + .Ld2_iB]	# [b,d]
 	vmovdqa64	zmm15, [rip + .Ld2_i4]	# restore block 0
 	vmovdqa64	zmm26, [rip + .Ld2_i5]	# restore block 1
 .Ld2i_loop:
-	vpshufd		zmm23, [rsi], 0x44	# inner: [w2_0 x2, w3_0 x2, w2_1 x2, w3_1 x2]
-	vpshufd		zmm24, [rsi], 0xee
+	vmovdqu64	zmm24, [rsi]		# inner: the (w, w') pairs
+	vpshufd		zmm23, zmm24, 0x44	# [w2_0 x2, w3_0 x2, w2_1 x2, w3_1 x2]
+	vpshufd		zmm24, zmm24, 0xee
 	vpsrlq		zmm25, zmm24, 52
-	vpshufd		zmm20, [rbx], 0x44	# outer: one w per block
-	vshufi64x2	zmm20, zmm20, zmm20, 0x50
-	vpshufd		zmm21, [rbx], 0xee
-	vshufi64x2	zmm21, zmm21, zmm21, 0x50
+	vpbroadcastq	zmm20, [rbx+16]		# outer: w1 x4 in the high half, then w0 x4 under k4
+	vpbroadcastq	zmm20{k4}, [rbx]
+	vpbroadcastq	zmm21, [rbx+24]
+	vpbroadcastq	zmm21{k4}, [rbx+8]
 	vpsrlq		zmm22, zmm21, 52
 	vmovdqu64	zmm8, [r8]
 	vmovdqu64	zmm9, [r8+64]
