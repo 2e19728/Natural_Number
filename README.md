@@ -8,7 +8,7 @@ number-theoretic-transform engine. One thread, no external dependencies.
 > of the finest level left to the scalar kernel. The level schedule, the planner and
 > everything else are shared with the scalar library; see [`docs/avx512.md`](docs/avx512.md)
 > for the kernels, the tail and the verification. Hardware AVX-512 F/BW/DQ/VL/IFMA is
-> required unless `ntt_zmm_enable` is turned off.
+> auto-detected at startup (`ntt_zmm_cpu_ok()`); without it the scalar path runs.
 
 For balanced products of **2^16 … 2^26 limbs** (64 KiB … 4 MiB operands, 4 … 268 Mbit) it
 matches or beats **GNU MP 6.3.0** on most sizes, by up to **1.47x**:

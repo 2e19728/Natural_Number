@@ -405,9 +405,22 @@ inline constexpr int ntt_scale_l2_threshold = 16;
 inline constexpr int ntt_scale_l3_threshold = 20;
 #endif
 
-// AVX-512 variant: run the merged passes on the IFMA zmm kernels (D >= 8).  Off = scalar
-// kernels; the switch exists to A/B the two implementations bit for bit.
-inline bool ntt_zmm_enable = true;
+// AVX-512 variant: run the layers on the IFMA zmm kernels.  false = the scalar kernels; the
+// switch exists to A/B the two implementations bit for bit.
+//
+// The default asks the CPU, so a machine without AVX-512 F/BW/DQ/VL and IFMA (a CI runner,
+// say) silently takes the scalar path instead of dying on an illegal instruction; setting
+// the flag explicitly forces either implementation.
+inline bool ntt_zmm_cpu_ok() {
+#if defined(__GNUC__) || defined(__clang__)
+	return __builtin_cpu_supports("avx512f") && __builtin_cpu_supports("avx512bw") &&
+		__builtin_cpu_supports("avx512dq") && __builtin_cpu_supports("avx512vl") &&
+		__builtin_cpu_supports("avx512ifma");
+#else
+	return true;
+#endif
+}
+inline bool ntt_zmm_enable = ntt_zmm_cpu_ok();
 
 // One level of the schedule: the layer range [lo, hi] (layer j = distance 2^j, run
 // descending forward and ascending inverse) plus the shape of its merged passes.

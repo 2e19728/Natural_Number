@@ -275,6 +275,7 @@ static void t_sched_scales() {
 // directions, every D the engine can use at this scale, all three moduli.
 static void t_zmm_kernels() {
 	group("avx512: zmm kernels == scalar kernels");
+	if (!ntt_zmm_cpu_ok()) { std::printf(" skipped (no AVX-512 IFMA)"); done(); return; }
 	const int scale = 16;
 	const uint64_t size = 1ull << scale;
 	ntt_workspace w(rnat(size >> 1), scale);
@@ -336,6 +337,7 @@ static void t_zmm_kernels() {
 // tail, none of which the single-pass check above reaches.
 static void t_zmm_paths() {
 	group("avx512: zmm engine vs scalar engine");
+	if (!ntt_zmm_cpu_ok()) { std::printf(" skipped (no AVX-512 IFMA)"); done(); return; }
 	for (uint64_t n : { 896ull, 1000ull, 2048ull, 4096ull, 9000ull, 20000ull, 70000ull }) {
 		natural a = rnat(n), b = rnat(n);
 		ntt_zmm_enable = true;
