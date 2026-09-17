@@ -21,9 +21,9 @@ All notable changes to this project are documented here.  The format follows
   `ntt_level::tail`, so every merged pass has `D >= 8` and `D = 4` never occurs; the unpaired
   layer moves from layer 1 to the distance-8 layer 3.  Both are bit-identical to the scalar
   radix-4 kernel at `D = 2`, at every chunk size and offset (`tests/test_natural.cpp`).  End
-  to end the completed variant is 1.68x the scalar library on the product and 1.64x on the
-  square (powers of two, 896..4194304 limbs) and 2.29x / 2.32x GNU MP at 2^22 limbs.  See
-  `docs/avx512.md`.
+  to end the completed variant is 1.70-1.71x the scalar library on the product and 1.66-1.69x
+  on the square (powers of two, 896..4194304 limbs) and 2.45-2.56x / 2.34-2.39x GNU MP at
+  2^22 limbs.  See `docs/avx512.md`.
 
 ### Changed
 - Synced the schedule refactor from the scalar library (`sched-refactor`): the NTT layer

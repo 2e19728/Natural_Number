@@ -454,23 +454,31 @@ nat_asmNtt_zmm_radix4_d2:
 #   void nat_asmINtt_zmm_radix4_d2(uint64_t D, uint64_t mod, uint64_t* Begin,
 #                                  const uint64_t* RootO, const uint64_t* RootI, uint64_t* End);
 #
-# Same 16-element iteration and the same gather/restore skeleton as the forward kernel; only
-# the butterflies differ, because the inverse applies the distance-D layer first:
+# The forward kernel's three regroupings, run in the opposite order: the inverse applies the
+# distance-D layer first, so it is the *gather* that has to bring the D-pairs into vertical
+# lanes and the *regroup* that puts the 2D-pairs back into vertical lanes.
 #
-#   inner (D):   s = a + b -> red(s) at the a slots;  x = a - b + m -> S56(x, w2/w3) at b
-#                (Vf = [a,c] and Vs = [b,d], so *every* lane of both vectors is useful)
-#   outer (2D):  the pairs (a1,c1) and (b1,d1) now sit two lanes apart *inside* one vector, so
-#                one vshufi64x2 (0xB1, swapping the 2-lane groups of each 128-bit lane) brings
-#                the partner over: s = V + P, x = P - V + m, then a masked move (0xCC) puts the
-#                S56 result (c2, d2) at the c/d slots and red(s) (a2, b2) at the a/b slots.
-#   The outer twiddle is one broadcast per block -- the pair members share w -- and the inner
-#   one is the same 2-lane-interleaved [w2_0 w3_0 w2_1 w3_1] pattern the forward uses, so both
-#   twiddle vectors are built exactly as in the forward kernel: four vpbroadcastq for the
-#   outer one (the second pair of each under k4 = 0x0f) and one 64-byte load plus two register
-#   vpshufd for the inner one.
+#   gather:  [a c ...] = [m0 m1 m4 m5 ...]  x  [b d ...] = [m2 m3 m6 m7 ...]       (iA / iB)
+#   inner:   s = a + b -> red(s) at the a/c slots, x = a - b + m -> S56(x, w2/w3) at b/d
+#   regroup: [a1 b1 a1' b1' ...] x [c1 d1 c1' d1' ...]                              (i3 / i2)
+#   outer:   s = a1 + c1 -> red(s) at the a/b slots, x = a1 - c1 + m -> S56(x, w) at c/d
+#   restore: the two quarters of each block interleave back into memory order        (i0 / i1)
 #
-# Registers as in the forward kernel; k3 (0xCC, the outer blend) and k4 (0x0f, the outer
-# broadcast) are set once outside the loop.
+# Both layers are then ordinary vertical butterflies between two vectors that hold *all* the
+# lanes of the iteration, and each costs one S56 and one RED -- the forward kernel's two of
+# each, with no half-vector case and no mask register.  Nothing is folded over a lane
+# boundary, so the sign of the S56 argument (a - b, a1 - c1) is automatically the one its own
+# lane wants; the two extra vpermt2q stages are exactly what buys the uniform butterflies.
+#
+# Both twiddle vectors are built as in the forward kernel, from the same tables: the outer one
+# is four vpbroadcastq (the low block's w and w' merge-masked in under k4 = 0x0f, set once
+# outside the loop), the inner one is one 64-byte load plus two register vpshufd.  The outer
+# twiddle is still one broadcast per block -- the pair members share w -- and the inner one is
+# still the 2-lane-interleaved [w2_0 w3_0 w2_1 w3_1] pattern, because the gather leaves the
+# D-pairs in the same lanes the forward's regroup put them in.
+#
+# Registers as in the forward kernel; k4 (0x0f, the outer broadcast) is set once outside the
+# loop.  No blend mask is needed.
 	.globl	nat_asmINtt_zmm_radix4_d2
 nat_asmINtt_zmm_radix4_d2:
 	push	rbx
@@ -487,57 +495,52 @@ nat_asmINtt_zmm_radix4_d2:
 	shr	rax, 56
 	shl	rax, 16
 	vpbroadcastq	zmm30, rax		# a<<16
-	mov	eax, 0xcc
-	kmovw	k3, eax			# the outer blend: keep red(s), take Shoup at c/d
 	mov	eax, 0x0f
 	kmovw	k4, eax			# the outer broadcast mask
-	vmovdqa64	zmm11, [rip + .Ld2_iA]	# [a,c]
-	vmovdqa64	zmm12, [rip + .Ld2_iB]	# [b,d]
-	vmovdqa64	zmm15, [rip + .Ld2_i4]	# restore block 0
-	vmovdqa64	zmm26, [rip + .Ld2_i5]	# restore block 1
+	vmovdqa64	zmm11, [rip + .Ld2_iA]	# gather: [a, c, ...]
+	vmovdqa64	zmm12, [rip + .Ld2_iB]	# gather: [b, d, ...]
+	vmovdqa64	zmm13, [rip + .Ld2_i3]	# regroup: [a1, b1, ...]
+	vmovdqa64	zmm14, [rip + .Ld2_i2]	# regroup: [c1, d1, ...]
+	vmovdqa64	zmm15, [rip + .Ld2_i0]	# restore block 0
+	vmovdqa64	zmm26, [rip + .Ld2_i1]	# restore block 1
 .Ld2i_loop:
-	vmovdqu64	zmm24, [rsi]		# inner: the (w, w') pairs
-	vpshufd		zmm23, zmm24, 0x44	# [w2_0 x2, w3_0 x2, w2_1 x2, w3_1 x2]
-	vpshufd		zmm24, zmm24, 0xee
-	vpsrlq		zmm25, zmm24, 52
 	vpbroadcastq	zmm20, [rbx+16]		# outer: w1 x4 in the high half, then w0 x4 under k4
 	vpbroadcastq	zmm20{k4}, [rbx]
 	vpbroadcastq	zmm21, [rbx+24]
 	vpbroadcastq	zmm21{k4}, [rbx+8]
 	vpsrlq		zmm22, zmm21, 52
+	vmovdqu64	zmm24, [rsi]		# inner: the (w, w') pairs
+	vpshufd		zmm23, zmm24, 0x44	# [w2_0 x2, w3_0 x2, w2_1 x2, w3_1 x2]
+	vpshufd		zmm24, zmm24, 0xee
+	vpsrlq		zmm25, zmm24, 52
 	vmovdqu64	zmm8, [r8]
 	vmovdqu64	zmm9, [r8+64]
 	vmovdqa64	zmm0, zmm8
-	vpermt2q	zmm0, zmm11, zmm9	# Vf = [a0,c0,a1,c1]
+	vpermt2q	zmm0, zmm11, zmm9	# Vf = [a, c] -- the distance-D pairs, now vertical
 	vmovdqa64	zmm1, zmm8
-	vpermt2q	zmm1, zmm12, zmm9	# Vs = [b0,d0,b1,d1]
-	# inner layer
+	vpermt2q	zmm1, zmm12, zmm9	# Vs = [b, d]
+	# inner layer (distance D)
 	vpaddq		zmm2, zmm0, zmm1	# s = a + b
 	vpsubq		zmm3, zmm0, zmm1
 	vpaddq		zmm3, zmm3, zmm28	# x = a - b + m
 	S56		zmm, zmm1, zmm3, zmm23, zmm24, zmm25, zmm16, zmm17, zmm18
 	RED		zmm, zmm2			# red(s) -> a1, c1
-	# outer layer: partner = the neighbouring 2-lane group.  s = V + P and x = P - V + m are
-	# both correct at *opposite* slots (s commutes, x does not), so the blend takes red(s) from
-	# the a/b slots below the mask and S56(x) from the c/d slots inside it.
-	vshufi64x2	zmm4, zmm2, zmm2, 0xb1	# [c1, a1, c1', a1']
-	vpaddq		zmm5, zmm2, zmm4	# s
-	vpsubq		zmm6, zmm4, zmm2
-	vpaddq		zmm6, zmm6, zmm28	# x = a1 - c1 + m
-	S56		zmm, zmm6, zmm6, zmm20, zmm21, zmm22, zmm16, zmm17, zmm18
-	RED		zmm, zmm5			# red(s)
-	vmovdqa64	zmm5{k3}, zmm6		# a2 at the a slots, c2 at the c slots
-	vshufi64x2	zmm4, zmm1, zmm1, 0xb1	# [d1, b1, d1', b1']
-	vpaddq		zmm0, zmm1, zmm4	# s
-	vpsubq		zmm6, zmm4, zmm1
-	vpaddq		zmm6, zmm6, zmm28
-	S56		zmm, zmm6, zmm6, zmm20, zmm21, zmm22, zmm16, zmm17, zmm18
-	RED		zmm, zmm0
-	vmovdqa64	zmm0{k3}, zmm6		# b2 at the b slots, d2 at the d slots
-	vmovdqa64	zmm10, zmm5
-	vpermt2q	zmm10, zmm15, zmm0	# block 0 back in order
-	vmovdqa64	zmm27, zmm5
-	vpermt2q	zmm27, zmm26, zmm0	# block 1
+	# regroup: the distance-2D partners are now (a1,c1) and (b1,d1), so split the same two
+	# vectors by quarter instead; the outer layer is then a vertical butterfly again.
+	vmovdqa64	zmm4, zmm2
+	vpermt2q	zmm4, zmm13, zmm1	# [a1, b1, ...]
+	vmovdqa64	zmm5, zmm2
+	vpermt2q	zmm5, zmm14, zmm1	# [c1, d1, ...]
+	# outer layer (distance 2D)
+	vpaddq		zmm6, zmm4, zmm5	# s = a1 + c1
+	vpsubq		zmm0, zmm4, zmm5
+	vpaddq		zmm0, zmm0, zmm28	# x = a1 - c1 + m
+	S56		zmm, zmm5, zmm0, zmm20, zmm21, zmm22, zmm16, zmm17, zmm18
+	RED		zmm, zmm6			# red(s) -> a2, b2
+	vmovdqa64	zmm10, zmm6
+	vpermt2q	zmm10, zmm15, zmm5	# block 0 back in memory order
+	vmovdqa64	zmm27, zmm6
+	vpermt2q	zmm27, zmm26, zmm5	# block 1
 	vmovdqu64	[r8], zmm10
 	vmovdqu64	[r8+64], zmm27
 	add	r8, 128
@@ -552,14 +555,16 @@ nat_asmINtt_zmm_radix4_d2:
 
 	.section	.rodata
 	.align	64
-.Ld2_i0:	.quad 0,1,2,3, 8,9,10,11	# gather 1 -> [a0,b0,a1,b1]
-.Ld2_i1:	.quad 4,5,6,7, 12,13,14,15	# gather 1 -> [c0,d0,c1,d1]
-.Ld2_i2:	.quad 2,3,10,11, 6,7,14,15	# gather 2 -> [b0,d0,b1,d1]
-.Ld2_i3:	.quad 0,1,8,9, 4,5,12,13	# gather 2 -> [a0,c0,a1,c1]
-.Ld2_i4:	.quad 0,1,8,9, 2,3,10,11	# restore block 0
-.Ld2_i5:	.quad 4,5,12,13, 6,7,14,15	# restore block 1
-.Ld2_iA:	.quad 0,1,4,5, 8,9,12,13	# inverse: [a0,c0,a1,c1] straight from the blocks
-.Ld2_iB:	.quad 2,3,6,7, 10,11,14,15	# inverse: [b0,d0,b1,d1]
+.Ld2_i0:	.quad 0,1,2,3, 8,9,10,11	# fwd gather 1 / inv restore 0 -> [a,b ...]
+.Ld2_i1:	.quad 4,5,6,7, 12,13,14,15	# fwd gather 1 / inv restore 1 -> [c,d ...]
+.Ld2_i2:	.quad 2,3,10,11, 6,7,14,15	# fwd regroup -> [b,d ...] / inv regroup -> [c1,d1 ...]
+.Ld2_i3:	.quad 0,1,8,9, 4,5,12,13	# fwd regroup -> [a,c ...] / inv regroup -> [a1,b1 ...]
+.Ld2_i4:	.quad 0,1,8,9, 2,3,10,11	# fwd restore block 0
+.Ld2_i5:	.quad 4,5,12,13, 6,7,14,15	# fwd restore block 1
+# The inverse needs its own pair for the gather: it starts from the two half-arrays, not from
+# the forward's post-outer V0/V1, so the same lane contents live in different source registers.
+.Ld2_iA:	.quad 0,1,4,5, 8,9,12,13	# inv gather -> [a,c ...]
+.Ld2_iB:	.quad 2,3,6,7, 10,11,14,15	# inv gather -> [b,d ...]
 	.text
 
 	.section	.note.GNU-stack,"",@progbits
