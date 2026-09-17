@@ -81,11 +81,16 @@ g++ -O3 -march=native -std=c++20 -masm=intel -Iinclude \
   butterfly outputs kept in the lazy range `[0, 2p)` so add/sub need no correction step.
   Twiddle multiplication is Shoup's trick with a precomputed reciprocal; the three residues
   are recombined by `nat_asmCRT`.
-* **Three-level schedule.** Level A over the whole array, level B per 512 KiB chunk, level C
-  per 32 KiB sub-chunk, each merged as radix-4 (two layers per pass) with positionally
-  computed twiddle cursors. The three edge passes are *fused* into passes that were already
-  touching the data (fold in `load()`, last forward layer + pointwise + first inverse layer
-  in `nat_asmNttMul`, last inverse layer + the final shift in `intt_shr`).
+* **DRAM / L3 / L2 / L1 schedule.** The scheduled layers are run level by level, chunk-major,
+  one level per memory level: the whole array (DRAM), then `2^20`-element chunks (the 24 MiB
+  L3 working set of the three residues), `2^16` (L2) and `2^12` (L1). Each level merges two
+  layers per pass (radix-4) with positionally computed twiddle cursors, and the cut points
+  are clamped to the array size and de-duplicated per transform, so a small scale simply has
+  fewer levels. Boundaries are parity aligned, so the only unpaired layer a level can leave is
+  the distance-2 layer, run last forward and first inverse (the minimum-distance end in both
+  directions). The three edge passes are *fused* into passes that were already touching the
+  data (fold in `load()`, last forward layer + pointwise + first inverse layer in
+  `nat_asmNttMul`, last inverse layer + the final shift in `intt_shr`).
 * **One size shorter.** Just above a power of two the transform would be half empty; instead
   a cyclic convolution of length `N` plus the exact correction `a·b = C + (B^N − 1)·H`
   replaces it, and a cost model picks the cheaper of the direct, split and wrap paths.
@@ -105,7 +110,8 @@ ctest --test-dir build --output-on-failure
 The test suite is self-contained: it checks every arithmetic path against a plain O(n·m)
 128-bit schoolbook written inside the test, and checks every pair of internal paths against
 each other (base case vs Toom-22 vs NTT, planner on/off, wrap correction on/off, `sqr` vs
-`a*a`, division inverting multiplication). It runs in about a tenth of a second.
+`a*a`, the NTT schedule plan and its explicit-scale products vs the base case, division
+inverting multiplication). It runs in a few seconds.
 
 ## Repository layout
 

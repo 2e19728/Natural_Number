@@ -25,7 +25,7 @@
 // ntt_scale, info[3] -> ntt_data[3], NTT()/INTT()/CRT() -> ntt()/intt()/crt().
 // The three thresholds that used to live in ntt_info.h (mul_ntt_threshold,
 // div_ntt_threshold, mul_ntt_scale_threshold) are kept here, since ntt_workspace.h only
-// carries the L3 threshold for the layer schedule.
+// carries the L1/L2/L3 cut points of the layer schedule.
 //
 // KNOWN-ISSUE HISTORY / current state of reciprocal():
 // The Newton accuracy bookkeeping in reciprocal() is a heuristic.  For some divisors the

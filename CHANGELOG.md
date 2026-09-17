@@ -4,6 +4,22 @@ All notable changes to this project are documented here.  The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+- The NTT layer schedule is now one rule-based plan instead of three hard-coded nesting levels
+  plus two fallback schedules.  `ntt_sched_for(k)` returns up to four *levels* (`ntt_sched`,
+  `ntt_level`) — DRAM (the whole array) and the L3 / L2 / L1 working sets — cut by the
+  `inline constexpr` `ntt_scale_l1_threshold` / `_l2_` / `_l3_` constants, clamped to the array
+  size and de-duplicated per transform, so a small scale simply has fewer levels.  The
+  `ntt_sched_v3` A/B switch and the `ntt_sched_min_scale` boundary are gone, as are the plain
+  single-layer loop and the two-level schedule they selected: every scale now runs the same
+  code.  The runtime tunables `ntt_sched_la` / `ntt_sched_lb` and
+  `ntt_workspace::sched_levels()` are gone too; the cut points can still be scanned from the
+  command line (`-Dntt_scale_l2_threshold=14`).  Level boundaries are parity aligned, so the
+  only unpaired layer the schedule can leave is the distance-2 layer, always run at the
+  minimum-distance end of both the forward and the inverse order.
+
 ## [4.0.0] - 2026-09-16
 
 First packaged release of the `nat` library.
