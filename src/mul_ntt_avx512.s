@@ -345,4 +345,112 @@ nat_asmINtt_\P\()_radix2:
 	F2GEN	zmm, 64, 6
 	I2GEN	zmm, 64, 6
 
+
+# ---- D = 2 tail: the finest level's fixed (2,1) pair, packed into zmm ----
+#   void nat_asmNtt_zmm_radix4_d2(uint64_t D, uint64_t mod, uint64_t* Begin,
+#                                 const uint64_t* RootO, const uint64_t* RootI, uint64_t* End);
+#   Same two merged layers as the scalar nat_asmNtt_radix4(2, ...) (which is what the tail
+#   uses when ntt_zmm_enable is off), same positional cursors, bit-identical results.
+#
+# With D = 2 the four quarters of a macro-block are two elements each, so a 16-element
+# iteration covers two blocks and every lane needs a different twiddle.  The kernel therefore
+# regroups the lanes three times (2x vpermt2q each) so that all lanes of a vector share one
+# multiplier, and makes the butterflies *vertical* between two vectors:
+#
+#   [a0 b0 a1 b1]  (gather 1)  x  [c0 d0 c1 d1]   outer layer, twiddles [w0 x4, w1 x4]
+#   [b0 d0 b1 d1]  (gather 2)  x  [a0 c0 a1 c1]   inner layer, twiddles 2-lane interleaved
+#   [a0 b0 c0 d0], [a1 b1 c1 d1]  (restore)       store back in memory order
+#
+# The twiddle vectors come straight out of the root table, which stores (w, w') pairs: one
+# vpshufd with 0x44 duplicates every w of a 128-bit lane, 0xEE every w'.  The inner layer
+# wants [w2_0 w2_0 w3_0 w3_0 w2_1 w2_1 w3_1 w3_1] and 0x44 produces exactly that; the outer
+# wants 4-lane groups, so one vshufi64x2 (lanes 0,0,1,1) follows.  No mask register is needed
+# and the block-0 twiddle (1) needs no special case: S56 with w = 1 reproduces the
+# multiply-free butterfly, which is why the generic scalar kernel and nat_asmNtt_radix4 agree
+# on block 0 too.
+#
+# Register map: R0/R1,R3/R4/R5 outer then inner lo/hi pairs, R2/R6 Z, R8/R9 loads,
+#   R10/R19/R27 staging, R11..R15/R26 permutation indices (set once), R16..R18 S56 scratch,
+#   R20..R22 outer w/w'/w'>>52, R23..R25 inner, R28 m, R29 sign, R30 a<<16.
+# The loop steps 128 bytes = 16 elements; the schedule's smallest level chunk is 2^4, so a
+# span is always a multiple of 16.
+	.globl	nat_asmNtt_zmm_radix4_d2
+nat_asmNtt_zmm_radix4_d2:
+	push	rbx
+	push	rbp
+	mov	rbp, r9				# End
+	mov	rdi, rsi			# mod
+	mov	rbx, rcx			# RootO
+	mov	rsi, r8				# RootI
+	mov	r8,  rdx			# Begin
+	vpbroadcastq	zmm28, rdi		# m
+	movabs	rax, 0x8000000000000000
+	vpbroadcastq	zmm29, rax		# sign bit
+	mov	rax, rdi
+	shr	rax, 56
+	shl	rax, 16
+	vpbroadcastq	zmm30, rax		# a<<16
+	vmovdqa64	zmm11, [rip + .Ld2_i0]
+	vmovdqa64	zmm12, [rip + .Ld2_i1]
+	vmovdqa64	zmm13, [rip + .Ld2_i2]
+	vmovdqa64	zmm14, [rip + .Ld2_i3]
+	vmovdqa64	zmm15, [rip + .Ld2_i4]
+	vmovdqa64	zmm26, [rip + .Ld2_i5]
+.Ld2_loop:
+	vpshufd		zmm20, [rbx], 0x44	# every w of a (w, w') pair, duplicated
+	vshufi64x2	zmm20, zmm20, zmm20, 0x50	# -> [w0 x4, w1 x4]
+	vpshufd		zmm21, [rbx], 0xee	# the reciprocals
+	vshufi64x2	zmm21, zmm21, zmm21, 0x50
+	vpsrlq		zmm22, zmm21, 52
+	vpshufd		zmm23, [rsi], 0x44	# [w2_0 x2, w3_0 x2, w2_1 x2, w3_1 x2]
+	vpshufd		zmm24, [rsi], 0xee
+	vpsrlq		zmm25, zmm24, 52
+	vmovdqu64	zmm8, [r8]		# block 0, elements 0..7
+	vmovdqu64	zmm9, [r8+64]		# block 1, elements 8..15
+	vmovdqa64	zmm0, zmm8
+	vpermt2q	zmm0, zmm11, zmm9	# V0 = [a0,b0,a1,b1]
+	vmovdqa64	zmm1, zmm8
+	vpermt2q	zmm1, zmm12, zmm9	# V1 = [c0,d0,c1,d1]
+	# the scalar's outer butterfly multiplies the hi element of each pair (d on (b,d),
+	# c on (a,c)) and reds the lo one: V1 (c,d) carries the multiply, V0 (a,b) the red
+	S56		zmm, zmm2, zmm1, zmm20, zmm21, zmm22, zmm16, zmm17, zmm18
+	RED		zmm, zmm0		# U = red(V0)
+	vpaddq		zmm1, zmm0, zmm28
+	vpsubq		zmm1, zmm1, zmm2	# V1 = U + m - Z   (c', d')
+	vpaddq		zmm0, zmm0, zmm2	# V0 = U + Z       (a', b')
+	vmovdqa64	zmm4, zmm0
+	vpermt2q	zmm4, zmm13, zmm1	# V2 = [b0,d0,b1,d1]  (takes the inner multiply)
+	vmovdqa64	zmm5, zmm0
+	vpermt2q	zmm5, zmm14, zmm1	# V3 = [a0,c0,a1,c1]
+	S56		zmm, zmm6, zmm4, zmm23, zmm24, zmm25, zmm16, zmm17, zmm18
+	RED		zmm, zmm5		# U2 = red(V3)
+	vpaddq		zmm4, zmm5, zmm28
+	vpsubq		zmm4, zmm4, zmm6	# V2 = U2 + m - Z2  (b'', d'')
+	vpaddq		zmm5, zmm5, zmm6	# V3 = U2 + Z2      (a'', c'')
+	vmovdqa64	zmm10, zmm5
+	vpermt2q	zmm10, zmm15, zmm4	# block 0 back in memory order
+	vmovdqa64	zmm27, zmm5
+	vpermt2q	zmm27, zmm26, zmm4	# block 1
+	vmovdqu64	[r8], zmm10
+	vmovdqu64	[r8+64], zmm27
+	add	r8, 128
+	add	rbx, 32			# one RootO pair per block
+	add	rsi, 64			# two RootI pairs per block
+	cmp	r8, rbp
+	jb	.Ld2_loop
+	vzeroupper
+	pop	rbp
+	pop	rbx
+	ret
+
+	.section	.rodata
+	.align	64
+.Ld2_i0:	.quad 0,1,2,3, 8,9,10,11	# gather 1 -> [a0,b0,a1,b1]
+.Ld2_i1:	.quad 4,5,6,7, 12,13,14,15	# gather 1 -> [c0,d0,c1,d1]
+.Ld2_i2:	.quad 2,3,10,11, 6,7,14,15	# gather 2 -> [b0,d0,b1,d1]
+.Ld2_i3:	.quad 0,1,8,9, 4,5,12,13	# gather 2 -> [a0,c0,a1,c1]
+.Ld2_i4:	.quad 0,1,8,9, 2,3,10,11	# restore block 0
+.Ld2_i5:	.quad 4,5,12,13, 6,7,14,15	# restore block 1
+	.text
+
 	.section	.note.GNU-stack,"",@progbits

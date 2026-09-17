@@ -46,6 +46,12 @@ extern "C" {
 
 	void nat_asmINtt_zmm_radix2(uint64_t _N, uint64_t _Mod, uint64_t* _Begin, const uint64_t* _Root, uint64_t* _End);
 
+	// The D = 2 tail (the finest level's fixed (2,1) pair), same layers and cursors as
+	// nat_asmNtt2_radix4(2, ...) / nat_asmINtt2_radix4(2, ...) but with 16 elements per
+	// iteration.  _D must be 2; it is kept as an argument so the call sites read like the
+	// other kernels.
+	void nat_asmNtt_zmm_radix4_d2(uint64_t _D, uint64_t _Mod, uint64_t* _Begin, const uint64_t* _RootO, const uint64_t* _RootI, uint64_t* _End);
+
 	// Fused last NTT layer x pointwise multiply x first INTT layer, for modulus _I
 	// (one generic function replacing the original asmNttMul0/1/2; see mul_ntt.s).
 	void nat_asmNttMul(uint64_t _N, uint64_t* _Dst, const uint64_t* _Src1, const uint64_t* _Src2, const uint64_t* _Root, uint64_t _I);
@@ -520,10 +526,11 @@ inline void ntt_fwd_level(uint64_t* _Data, uint64_t _Base, uint64_t _Span, const
 		else if (_Base == 0) nat_asmNtt(d, M, B, r, E);
 		else nat_asmNtt2(d, M, B, r, E);
 	}
-	if (lv.tail) {                                   // layers 2 then 1, the scalar tail
+	if (lv.tail) {                                   // layers 2 then 1, the tail
 		const uint64_t* ro = R + (_Base >> 2);
 		const uint64_t* ri = R + (_Base >> 1);
-		if (_Base == 0) nat_asmNtt_radix4(2, M, B, ro, ri, E);
+		if (ntt_zmm_enable) nat_asmNtt_zmm_radix4_d2(2, M, B, ro, ri, E);
+		else if (_Base == 0) nat_asmNtt_radix4(2, M, B, ro, ri, E);
 		else nat_asmNtt2_radix4(2, M, B, ro, ri, E);
 	}
 }
