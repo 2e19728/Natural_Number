@@ -46,11 +46,27 @@ drive the schedule:
 * the twiddle cursor is purely positional: a pass over `[base, base + 2^T)` must start at
   table entry `base >> j`. There is no per-chunk renormalisation to compute.
 
-So the transform is run at three levels — A over the whole array, B per 512 KiB chunk
-(`la = 16`), C per 32 KiB sub-chunk (`lb = 12`) — each level merging two layers per pass
-(radix-4) and deriving its two table cursors from `base`. Level C's working set is L1
-resident, level B's is L2 resident, and the whole-array level A uses macro-blocks of at least
-`2^(la+2)` elements, so every level streams once.
+So the scheduled layers are run one level per memory level, coarse to fine: DRAM (the whole
+array), then the L3 / L2 / L1 working sets — `2^20`-element chunks (24 MiB for the three
+residues), `2^16` (1.5 MiB) and `2^12` (96 KiB). Each level merges two layers per pass
+(radix-4) and derives its two table cursors from `base`, and inside a level the layers are run
+chunk-major — every layer of the level over one chunk before moving on — so the chunk stays
+resident across the whole level and the level streams the array once. The cut points are the
+`ntt_scale_l1/l2/l3_threshold` constants, clamped to the array size and de-duplicated, so a
+scale too small to fill a level simply has fewer levels (below `l1`, all four collapse into a
+single DRAM pass).
+
+Level boundaries are parity aligned, which makes every level an even number of layers except
+possibly the finest one; the unpaired layer, when it exists, is always at the bottom of the
+finest merged range, and it is run last in the forward order and first in the inverse order —
+the position the layer order gives the smallest distance anyway. Because it is always the
+same layer, the forward and the inverse level runners remain mirror images of each other.
+
+In this AVX-512 variant the merged passes run on IFMA zmm kernels, which need one zmm per
+quarter of the 4D block (`D >= 8`). The finest level therefore peels its fixed distance-2
+pair (layers 2 and 1) off the merged range into a scalar "tail", so the merged range starts
+at layer 3, `D = 4` never occurs, and the unpaired layer is the distance-8 layer 3. See
+[`avx512.md`](avx512.md).
 
 The three "edge" passes of the transform are not paid for separately; they are fused into
 passes that already touch the data:

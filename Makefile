@@ -10,7 +10,7 @@ CXX      ?= g++
 CXXFLAGS ?= -O3 -march=native -std=c++20 -masm=intel
 CPPFLAGS ?= -Iinclude
 
-ASM   := src/mul_basecase.s src/mul_ntt.s
+ASM   := src/mul_basecase.s src/mul_ntt.s src/mul_ntt_avx512.s
 HDRS  := $(wildcard include/natural/*.h)
 BUILD := build
 

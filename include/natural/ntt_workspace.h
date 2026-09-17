@@ -32,6 +32,13 @@ extern "C" {
 
 	void nat_asmINtt2_radix4(uint64_t _D, uint64_t _Mod, uint64_t* _Begin, const uint64_t* _RootO, const uint64_t* _RootI, uint64_t* _End);
 
+	// AVX-512 (IFMA) merged radix-4 kernels: same signature and layer semantics as the two
+	// nat_asm*2_radix4 above, but one zmm per quarter, so they need D >= 8.  Verified
+	// bit-identical to nat_asmNtt2_radix4 / nat_asmINtt2_radix4 (see tests/test_natural.cpp).
+	void nat_asmNtt_zmm_radix4(uint64_t _D, uint64_t _Mod, uint64_t* _Begin, const uint64_t* _RootO, const uint64_t* _RootI, uint64_t* _End);
+
+	void nat_asmINtt_zmm_radix4(uint64_t _D, uint64_t _Mod, uint64_t* _Begin, const uint64_t* _RootO, const uint64_t* _RootI, uint64_t* _End);
+
 	// Fused last NTT layer x pointwise multiply x first INTT layer, for modulus _I
 	// (one generic function replacing the original asmNttMul0/1/2; see mul_ntt.s).
 	void nat_asmNttMul(uint64_t _N, uint64_t* _Dst, const uint64_t* _Src1, const uint64_t* _Src2, const uint64_t* _Root, uint64_t _I);
@@ -157,10 +164,6 @@ struct ntt_workspace {
 	void ntt();
 
 	void intt();
-
-	// version-3 schedule: level cut points used for this transform (see the block
-	// comment above ntt_fwd_range); declared here, defined with the schedule.
-	void sched_levels(int& _La, int& _Lb) const;
 
 	void mul(const ntt_workspace&, const ntt_workspace&);
 
@@ -289,7 +292,7 @@ inline void ntt_workspace::load(const array_u64& n, int scale) {
 	load(n.data, n.size, scale);
 }
 
-// ================= NTT schedule, version 3: three blocked levels ==================
+// ================= NTT schedule: one plan, DRAM / L3 / L2 / L1 levels =============
 //
 // The transform is a fixed sequence of DIF layers at distances 2^(k-1), 2^(k-2), ...,
 // 2^1 (k = ntt_scale, array size 2^k = 2*2^(k-1)):
@@ -320,18 +323,38 @@ inline void ntt_workspace::load(const array_u64& n, int scale) {
 //      RootI = table + (base >> (j-1))    for the layer at distance D = 2^(j-1),
 // so any range of layers can be run as merged passes at any level.
 //
-// Three levels, given as element-count exponents:
-//      level A: layers [la, k-2]   over the whole array      (a 2^la-chunk level)
-//      level B: layers [lb, la-1]  per 2^la chunk
-//      level C: layers [1, lb-1]   per 2^lb sub-chunk
-// Fact (1) forces A before B before C on the forward side and the exact mirror on the
-// inverse side.  la/lb are runtime tunables (verify/n3sched.sh scans them); the
-// defaults 16/12 come from measurements at scales 21..25: level C's working set is
-// 2^lb*8 = 32 KiB per modulus (L1-resident, so its ~11 layers cost one L1 fetch each
-// instead of re-streaming the parent chunk), level B keeps a 2^la chunk (512 KiB per
-// modulus, L2-resident), and level A uses whole-array radix-4 passes whose macro
-// blocks are at least 2^(la+2) elements.  Every level uses radix-4 (two layers per
-// pass) with a single radix-2 pass for a leftover odd layer at the bottom of a range.
+// The four levels of the memory hierarchy, coarse to fine: DRAM, L3, L2, L1.  Level T runs
+// the layers that fit a chunk of 2^T limbs, i.e. every layer j <= T-1: layer j is block
+// diagonal with respect to 2^(j+1)-element blocks (fact (1)), so its blocks fit iff
+// 2^(j+1) <= 2^T.  DRAM is the whole array (a chunk of 2^k); L3/L2/L1 are the 2^20 / 2^16 /
+// 2^12-limb working sets of the three residues -- 24 MiB / 1.5 MiB / 96 KiB, the caches of
+// the reference CPU:
+//
+//      DRAM: the whole array       pairs whose block fits in no smaller chunk
+//      L3:   2^l3-element chunks   (ntt_scale_l3_threshold)
+//      L2:   2^l2-element chunks   (ntt_scale_l2_threshold)
+//      L1:   2^l1-element chunks   (ntt_scale_l1_threshold)
+//
+// Fact (1) forces DRAM before L3 before L2 before L1 forward and the exact mirror inverse,
+// and inside a level the layers are run chunk by chunk (chunk-major), so a chunk stays
+// cache resident across the whole level instead of being re-streamed once per layer.  The
+// cut points are clamped to the array size and then de-duplicated, so a small transform has
+// fewer levels rather than empty ones: at scale k <= l1 all four collapse into DRAM and the
+// transform is a single chunk-major walk over the whole array.
+//
+// A level is a whole number of merged radix-4 pairs except possibly the finest one, which
+// can leave its bottom layer unpaired.  That is the only unpaired layer the schedule can
+// produce -- the level boundaries are parity aligned in ntt_sched_for to make it so -- and
+// ntt_fwd_sched/ntt_inv_sched run it last forward and first inverse: the position the layer
+// order gives the smallest distance anyway.  Because it is always the same layer, the
+// forward and inverse level runners stay mirror images of each other.
+//
+// AVX-512 variant: the merged passes run on the IFMA zmm kernels, which need D >= 8 (one
+// zmm per quarter of the 4D macro-block).  The finest level therefore peels the fixed
+// distance-2 pair (layers 2 and 1) off its merged range into lv.tail and hands that pair to
+// the scalar radix-4 kernel.  The merged range then starts at layer 3, so every merged pass
+// left has D >= 8 and D = 4 never occurs at all; the unpaired layer, when there is one, is
+// the distance-8 layer 3.
 //
 // What is deliberately *not* here: the classic four-step / six-step FFT, i.e.
 // interpreting the array as an N1 x N2 matrix, running N1 transforms of length N2,
@@ -350,182 +373,211 @@ inline void ntt_workspace::load(const array_u64& n, int scale) {
 // whole extra pass over the array on the twiddle multiply.  The useful half of the
 // idea is already in place: the three edge passes (fold in load(), distance-1 layer in
 // nat_asmNttMul, wrap fold in save()) are fused, so no pass over the array pays for them.
+
+// Cut points of the schedule, as chunk exponents: the transform is run at four levels --
+// DRAM (the whole array, no constant) and then the L3 / L2 / L1 working sets.  A level's
+// chunk holds 2^T limbs of each modulus, i.e. 3 * 2^T * 8 bytes resident, which for the
+// reference CPU gives T = 12 (96 KiB, L1d), 16 (1.5 MiB, L2) and 20 (24 MiB, L3).  Any set
+// with 4 <= l1 <= l2 <= l3 is correct (the values are clamped -- to 4 when k >= 4, because
+// the finest level has to host the scalar tail's 8-element block and the distance-8 layer 3
+// -- and de-duplicated per scale), so a cut-point scan can override them without editing
+// this file: -Dntt_scale_l2_threshold=14.
 //
-// A single uniform layered loop (no radix-4) is kept for small scales, where the
-// arrays are cache-resident anyway and the merged kernels' extra register pressure
-// buys nothing; ntt_sched_min_scale sets that boundary.
+// inline constexpr, not plain `const`: a namespace-scope const object has INTERNAL
+// linkage, i.e. one private copy per TU; `inline` gives it a single shared definition.
+#ifndef ntt_scale_l1_threshold
+inline constexpr int ntt_scale_l1_threshold = 12;
+#endif
+#ifndef ntt_scale_l2_threshold
+inline constexpr int ntt_scale_l2_threshold = 16;
+#endif
+#ifndef ntt_scale_l3_threshold
+inline constexpr int ntt_scale_l3_threshold = 20;
+#endif
 
-// Boundary for the plain single-layer schedule (unchanged from version 1/2).  inline
-// constexpr (not plain `const`): a namespace-scope const object has INTERNAL linkage,
-// i.e. one private copy per TU; `inline` gives it a single shared definition.
-inline constexpr int ntt_scale_llc_threshold = 20;
+// AVX-512 variant: run the merged passes on the IFMA zmm kernels (D >= 8).  Off = scalar
+// kernels; the switch exists to A/B the two implementations bit for bit.
+inline bool ntt_zmm_enable = true;
 
-// version-3 tunables (runtime, so that verify/n3sched.sh can scan them without a
-// recompile; they are plain ints, read once per transform).
-inline int ntt_sched_la = 16;          // level-B chunk exponent (layers >= la stay whole-array)
-inline int ntt_sched_lb = 12;          // level-C sub-chunk exponent
-inline int ntt_sched_min_scale = 14;   // below this scale: the uniform single-layer loop
-inline bool ntt_sched_v3 = true;       // false = the version-2 two-level schedule (A/B test)
+// One level of the schedule: the layer range [lo, hi] (layer j = distance 2^j, run
+// descending forward and ascending inverse) plus the shape of its merged passes.
+// hi < lo means the level has no merged pass (a tail can still follow).
+struct ntt_level {
+	int lo, hi;    // lowest and highest layer of the merged range
+	int pairs;     // merged radix-4 passes: one per two layers
+	bool lone;     // odd number of layers: one unpaired distance-2^lo radix-2 pass
+	bool tail;     // the finest level also owns the fixed distance-2 pair (layers 2, 1)
+};
 
-// Forward layers 2^hi .. 2^lo (descending) over [base, base+span).
-inline void ntt_fwd_range(uint64_t* _Data, uint64_t _Base, uint64_t _Span, int _Lo, int _Hi, int _I) {
+// The schedule of one transform: at most four levels, DRAM, L3, L2 and L1.  chunk[0] is
+// always k (the DRAM level runs over the whole array), so level s works on
+// 2^chunk[s]-element chunks, of which there are 2^(chunk[s-1]-chunk[s]) per parent chunk.
+struct ntt_sched {
+	static constexpr int MAXLEVEL = 4;
+	int nlevel;
+	int chunk[MAXLEVEL];
+	ntt_level lv[MAXLEVEL];
+};
+
+// Schedules layers 2^(k-2) .. 2^1 -- the 2^(k-1) fold is fused into load() and the 2^0
+// layer into nat_asmNttMul.  Cut points are the cache thresholds, clamped to the array (a
+// threshold above k adds nothing) and de-duplicated (several clamping to the same value
+// collapse into one level).  The boundaries are then parity aligned to k-1, so every level
+// holds an even number of layers except possibly the last: the only unpaired layer the
+// schedule can produce is the bottom layer of the finest level's merged range (j = 3 in this
+// build, because the fixed distance-2 pair below it is the tail).  Dropping a boundary by one
+// layer moves it into the next coarser level, where it costs nothing.
+inline ntt_sched ntt_sched_for(int k) {
+	ntt_sched S;
+	S.nlevel = 0;
+	const int want[ntt_sched::MAXLEVEL] = {
+		k, ntt_scale_l3_threshold, ntt_scale_l2_threshold, ntt_scale_l1_threshold
+	};
+	for (int i = 0; i < ntt_sched::MAXLEVEL; i++) {
+		int v = want[i];
+		if (v > k) v = k;
+		if (v < (k >= 4 ? 4 : 2)) v = (k >= 4 ? 4 : 2);   // smallest chunk the finest level needs
+		if (S.nlevel > 0 && S.chunk[S.nlevel - 1] == v)
+			continue;
+		S.chunk[S.nlevel++] = v;
+	}
+	const int parity = (k - 1) & 1;
+	int lim = k - 1;
+	int b[ntt_sched::MAXLEVEL];
+	// boundary b[i]: level i runs layers [b[i+1], b[i]-1], with b[0] = k-1.  Every boundary
+	// has the parity of k-1, which is what keeps the level lengths even except possibly the
+	// last one; a boundary lowered to reach that parity pushes one layer into the coarser
+	// level above it.
+	for (int i = 0; i < S.nlevel; i++) {
+		if (lim > S.chunk[i]) lim = S.chunk[i];
+		if ((lim & 1) != parity) lim--;
+		if (lim < 1) lim = 1;          // degenerate cut points can undershoot on tiny sizes
+		b[i] = lim;
+		lim--;
+	}
+	for (int i = 0; i < S.nlevel; i++) {
+		ntt_level& lv = S.lv[i];
+		lv.hi = b[i] - 1;                              // merged range [lo, hi], see the tail
+		lv.lo = (i + 1 < S.nlevel) ? b[i + 1] : 1;
+		lv.tail = false;
+		if (i + 1 == S.nlevel && lv.hi >= 2) {         // finest level: peel the fixed (2,1) pair
+			lv.lo = 3;
+			lv.tail = true;
+		}
+		const int count = lv.hi - lv.lo + 1;
+		lv.pairs = count > 0 ? count / 2 : 0;
+		lv.lone = count > 0 && (count & 1) != 0;
+	}
+	return S;
+}
+
+// One forward level over [base, base+2^span): lv.pairs merged radix-4 passes covering the
+// layer pairs (hi, hi-1), (hi-2, hi-3), .., then the unpaired bottom layer, if any, LAST.
+// The twiddle cursor stays positional -- a pass at layer j over this chunk starts at
+// table element base>>j -- and the block-0 kernels are used iff base == 0.
+inline void ntt_fwd_level(uint64_t* _Data, uint64_t _Base, uint64_t _Span, const ntt_level& lv, int _I) {
+	if (lv.hi < lv.lo && !lv.tail)
+		return;
 	const uint64_t* R = ntt_workspace::root[_I].data;
 	const uint64_t M = ntt_workspace::mods[_I];
 	uint64_t* B = _Data + _Base;
 	uint64_t* E = B + _Span;
-	for (int j = _Hi; j >= _Lo;) {
-		if (j - 1 >= _Lo) {                          // merged pair: layers 2^j then 2^(j-1)
-			const uint64_t D = 1ull << (j - 1);
-			const uint64_t* ro = R + (_Base >> j);
-			const uint64_t* ri = R + (_Base >> (j - 1));
-			if (_Base == 0) nat_asmNtt_radix4(D, M, B, ro, ri, E);
-			else nat_asmNtt2_radix4(D, M, B, ro, ri, E);
-			j -= 2;
-		}
-		else {                                       // leftover odd layer at the bottom
-			const uint64_t d = 1ull << j;
-			const uint64_t* r = R + (_Base >> j);
-			if (_Base == 0) nat_asmNtt(d, M, B, r, E);
-			else nat_asmNtt2(d, M, B, r, E);
-			j -= 1;
-		}
+	for (int p = 0, j = lv.hi; p < lv.pairs; p++, j -= 2) {
+		const uint64_t D = 1ull << (j - 1);
+		const uint64_t* ro = R + (_Base >> j);
+		const uint64_t* ri = R + (_Base >> (j - 1));
+		if (ntt_zmm_enable && D >= 8) nat_asmNtt_zmm_radix4(D, M, B, ro, ri, E);
+		else if (_Base == 0) nat_asmNtt_radix4(D, M, B, ro, ri, E);
+		else nat_asmNtt2_radix4(D, M, B, ro, ri, E);
+	}
+	if (lv.lone) {
+		const uint64_t d = 1ull << lv.lo;
+		const uint64_t* r = R + (_Base >> lv.lo);
+		if (_Base == 0) nat_asmNtt(d, M, B, r, E);
+		else nat_asmNtt2(d, M, B, r, E);
+	}
+	if (lv.tail) {                                   // layers 2 then 1, the scalar tail
+		const uint64_t* ro = R + (_Base >> 2);
+		const uint64_t* ri = R + (_Base >> 1);
+		if (_Base == 0) nat_asmNtt_radix4(2, M, B, ro, ri, E);
+		else nat_asmNtt2_radix4(2, M, B, ro, ri, E);
 	}
 }
 
-// Inverse layers 2^lo .. 2^hi (ascending) over [base, base+span).  nat_asmINtt2_radix4(D,..)
-// is layers D then 2D, hence the pairing starts at the bottom of the range.
-inline void ntt_inv_range(uint64_t* _Data, uint64_t _Base, uint64_t _Span, int _Lo, int _Hi, int _I) {
+// Mirror of ntt_fwd_level.  nat_asmINtt_radix4(D,..) is layers D then 2D, so the merged
+// pairs of lv.pairs run ascending from the bottom of the range and the unpaired layer, if
+// any, goes FIRST.
+inline void ntt_inv_level(uint64_t* _Data, uint64_t _Base, uint64_t _Span, const ntt_level& lv, int _I) {
+	if (lv.hi < lv.lo && !lv.tail)
+		return;
 	const uint64_t* R = ntt_workspace::iroot[_I].data;
 	const uint64_t M = ntt_workspace::mods[_I];
 	uint64_t* B = _Data + _Base;
 	uint64_t* E = B + _Span;
-	for (int j = _Lo; j <= _Hi;) {
-		if (j + 1 <= _Hi) {                          // merged pair: layers 2^j then 2^(j+1)
-			const uint64_t D = 1ull << j;
-			const uint64_t* ro = R + (_Base >> (j + 1));
-			const uint64_t* ri = R + (_Base >> j);
-			if (_Base == 0) nat_asmINtt_radix4(D, M, B, ro, ri, E);
-			else nat_asmINtt2_radix4(D, M, B, ro, ri, E);
-			j += 2;
-		}
-		else {                                       // leftover odd layer at the top
-			const uint64_t d = 1ull << j;
-			const uint64_t* r = R + (_Base >> j);
-			if (_Base == 0) nat_asmINtt(d, M, B, r, E);
-			else nat_asmINtt2(d, M, B, r, E);
-			j += 1;
-		}
+	if (lv.tail) {                                   // layers 1 then 2, the scalar tail
+		const uint64_t* ro = R + (_Base >> 2);
+		const uint64_t* ri = R + (_Base >> 1);
+		if (_Base == 0) nat_asmINtt_radix4(2, M, B, ro, ri, E);
+		else nat_asmINtt2_radix4(2, M, B, ro, ri, E);
+	}
+	int j = lv.lo;
+	if (lv.lone) {
+		const uint64_t d = 1ull << j;
+		const uint64_t* r = R + (_Base >> j);
+		if (_Base == 0) nat_asmINtt(d, M, B, r, E);
+		else nat_asmINtt2(d, M, B, r, E);
+		j++;
+	}
+	for (int p = 0; p < lv.pairs; p++, j += 2) {
+		const uint64_t D = 1ull << j;
+		const uint64_t* ro = R + (_Base >> (j + 1));
+		const uint64_t* ri = R + (_Base >> j);
+		if (ntt_zmm_enable && D >= 8) nat_asmINtt_zmm_radix4(D, M, B, ro, ri, E);
+		else if (_Base == 0) nat_asmINtt_radix4(D, M, B, ro, ri, E);
+		else nat_asmINtt2_radix4(D, M, B, ro, ri, E);
 	}
 }
 
-// level cut points actually used for this transform: 2 <= lb <= la <= k-1.
-// ntt()/intt() cover layers 2^(k-2) .. 2^1 only (layer 2^(k-1) is the fold fused into
-// load()), so level B's top layer must stop at k-2 -- hence la <= k-1, not la <= k.
-inline void ntt_workspace::sched_levels(int& la, int& lb) const {
-	const int k = ntt_scale;
-	la = ntt_sched_la < 2 ? 2 : ntt_sched_la;
-	if (la > k - 1) la = k - 1;
-	lb = ntt_sched_lb < 2 ? 2 : ntt_sched_lb;
-	if (lb > la - 1) lb = la - 1;                    // lb < 2 switches level C off
+// Forward, pre-order: this level's layers over the current chunk, then the next finer
+// level, chunk by chunk.  The DRAM level is the whole array, so base stays 0 for it.
+inline void ntt_fwd_sched(uint64_t* _Data, uint64_t _Base, const ntt_sched& S, int _S, int _I) {
+	if (_S >= S.nlevel)
+		return;
+	const uint64_t nblk = _S == 0 ? 1 : (1ull << (S.chunk[_S - 1] - S.chunk[_S]));
+	for (uint64_t c = 0; c < nblk; c++) {
+		const uint64_t cb = _Base + (c << S.chunk[_S]);
+		ntt_fwd_level(_Data, cb, 1ull << S.chunk[_S], S.lv[_S], _I);
+		ntt_fwd_sched(_Data, cb, S, _S + 1, _I);
+	}
+}
+
+// Inverse, post-order: the finer levels first, then this level's layers -- the exact
+// mirror of ntt_fwd_sched.
+inline void ntt_inv_sched(uint64_t* _Data, uint64_t _Base, const ntt_sched& S, int _S, int _I) {
+	if (_S >= S.nlevel)
+		return;
+	const uint64_t nblk = _S == 0 ? 1 : (1ull << (S.chunk[_S - 1] - S.chunk[_S]));
+	for (uint64_t c = 0; c < nblk; c++) {
+		const uint64_t cb = _Base + (c << S.chunk[_S]);
+		ntt_inv_sched(_Data, cb, S, _S + 1, _I);
+		ntt_inv_level(_Data, cb, 1ull << S.chunk[_S], S.lv[_S], _I);
+	}
 }
 
 inline void ntt_workspace::ntt() {
-	const int k = ntt_scale;
-	if (ntt_sched_v3 && k >= ntt_sched_min_scale) {
-		int la, lb;
-		sched_levels(la, lb);
-		const uint64_t sz = ntt_data[0].size;
-		const uint64_t nB = sz >> la;                    // level-B chunks
-		for (int i = 0; i < 3; i++) {
-			uint64_t* D = ntt_data[i].data;
-			ntt_fwd_range(D, 0, sz, la, k - 2, i);       // level A (empty when la > k-2)
-			if (lb >= 2) {
-				const uint64_t nC = 1ull << (la - lb);   // level-C sub-chunks per chunk
-				for (uint64_t c = 0; c < nB; c++) {
-					const uint64_t cb = c << la;
-					ntt_fwd_range(D, cb, 1ull << la, lb, la - 1, i);          // level B
-					for (uint64_t s = 0; s < nC; s++)
-						ntt_fwd_range(D, cb + (s << lb), 1ull << lb, 1, lb - 1, i);   // level C
-				}
-			}
-			else {
-				for (uint64_t c = 0; c < nB; c++)
-					ntt_fwd_range(D, c << la, 1ull << la, 1, la - 1, i);
-			}
-		}
-		return;
-	}
-	if (k <= ntt_scale_llc_threshold) {                  // uniform singles (version 1/2)
-		for (int i = 0; i < 3; i++)
-			for (int j = k - 2; j >= 1; j--)
-				nat_asmNtt(1ull << j, mods[i], ntt_data[i].data, root[i].data, ntt_data[i].data + ntt_data[i].size);
-		return;
-	}
-	const int th = ntt_scale_llc_threshold - ((k - 1 - ntt_scale_llc_threshold) & 1);
-	for (int i = 0; i < 3; i++) {                        // version-2 two-level schedule
-		for (int j = k - 3; j >= th; j -= 2)
-			nat_asmNtt_radix4(1ull << j, mods[i], ntt_data[i].data,
-				root[i].data, root[i].data, ntt_data[i].data + ntt_data[i].size);
-		for (int j = th - 1; j >= 1; j--)
-			nat_asmNtt(1ull << j, mods[i], ntt_data[i].data, root[i].data,
-				ntt_data[i].data + (1ull << th));
-		for (uint64_t c = 1; c < ntt_data[i].size >> th; c++)
-			for (int j = th - 1; j >= 1; j--)
-				nat_asmNtt2(1ull << j, mods[i], ntt_data[i].data + (c << th),
-					root[i].data + (c << (th - j)), ntt_data[i].data + ((c + 1) << th));
-	}
+	const ntt_sched S = ntt_sched_for(ntt_scale);
+	for (int i = 0; i < 3; i++)
+		ntt_fwd_sched(ntt_data[i].data, 0, S, 0, i);
 }
 
 inline void ntt_workspace::intt() {
-	const int k = ntt_scale;
-	if (ntt_sched_v3 && k >= ntt_sched_min_scale) {
-		int la, lb;
-		sched_levels(la, lb);
-		const uint64_t sz = ntt_data[0].size;
-		const uint64_t nB = sz >> la;
-		for (int i = 0; i < 3; i++) {
-			uint64_t* D = ntt_data[i].data;
-			if (lb >= 2) {
-				const uint64_t nC = 1ull << (la - lb);
-				for (uint64_t c = 0; c < nB; c++) {
-					const uint64_t cb = c << la;
-					for (uint64_t s = 0; s < nC; s++)
-						ntt_inv_range(D, cb + (s << lb), 1ull << lb, 1, lb - 1, i);   // level C first
-					ntt_inv_range(D, cb, 1ull << la, lb, la - 1, i);              // then level B
-				}
-			}
-			else {
-				for (uint64_t c = 0; c < nB; c++)
-					ntt_inv_range(D, c << la, 1ull << la, 1, la - 1, i);
-			}
-			ntt_inv_range(D, 0, sz, la, k - 2, i);       // level A last
-			intt_shr(k, mods[i], D);
-		}
-		return;
-	}
-	if (k <= ntt_scale_llc_threshold) {
-		for (int i = 0; i < 3; i++) {
-			for (int j = 1; j <= k - 2; j++)
-				nat_asmINtt(1ull << j, mods[i], ntt_data[i].data, iroot[i].data, ntt_data[i].data + ntt_data[i].size);
-			intt_shr(k, mods[i], ntt_data[i].data);
-		}
-		return;
-	}
-	const int th = ntt_scale_llc_threshold - ((k - 1 - ntt_scale_llc_threshold) & 1);
+	const ntt_sched S = ntt_sched_for(ntt_scale);
 	for (int i = 0; i < 3; i++) {
-		for (int j = 1; j < th; j++)
-			nat_asmINtt(1ull << j, mods[i], ntt_data[i].data, iroot[i].data,
-				ntt_data[i].data + (1ull << th));
-		for (uint64_t c = 1; c < ntt_data[i].size >> th; c++)
-			for (int j = 1; j < th; j++)
-				nat_asmINtt2(1ull << j, mods[i], ntt_data[i].data + (c << th),
-					iroot[i].data + (c << (th - j)), ntt_data[i].data + ((c + 1) << th));
-		for (int j = th; j <= k - 3; j += 2)
-			nat_asmINtt_radix4(1ull << j, mods[i], ntt_data[i].data,
-				iroot[i].data, iroot[i].data, ntt_data[i].data + ntt_data[i].size);
-		intt_shr(k, mods[i], ntt_data[i].data);
+		ntt_inv_sched(ntt_data[i].data, 0, S, 0, i);
+		intt_shr(ntt_scale, mods[i], ntt_data[i].data);
 	}
 }
+
 // this = a * b in the NTT domain: the fused nat_asmNttMul kernel does "a's last forward
 // layer, the pointwise product, b's first inverse layer" in one pass over each modulus
 // (both operands must already have been transformed by NTT()).  Out-of-place: this must

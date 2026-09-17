@@ -23,7 +23,8 @@ set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR})
 # mostly about propagating the right usage requirements to whoever links it.
 add_library(natural STATIC
 	src/mul_basecase.s
-	src/mul_ntt.s)
+	src/mul_ntt.s
+	src/mul_ntt_avx512.s)
 add_library(natural::natural ALIAS natural)
 
 target_include_directories(natural PUBLIC
@@ -40,8 +41,12 @@ set_target_properties(natural PROPERTIES
 	POSITION_INDEPENDENT_CODE ON
 	CXX_EXTENSIONS OFF)
 
-# x86-64 only: the kernels use mulx (BMI2).  The build deliberately does not force a -march;
-# -march=x86-64-v3 is the lowest level that provides BMI2, and CI builds with exactly that.
+# x86-64 only: the scalar kernels use mulx (BMI2), and this AVX-512 variant adds IFMA zmm
+# radix-4 kernels (src/mul_ntt_avx512.s) that need AVX-512 F/BW/DQ/VL/IFMA at run time.
+# The instructions are only reached when ntt_zmm_enable is left on (the default), so a
+# machine without them can still link and run with that switch turned off.  The build
+# deliberately does not force a -march; -march=x86-64-v3 is the lowest level that provides
+# BMI2 for the scalar path.
 
 # ------------------------------------------------- tests / benchmarks / examples
 if(NATURAL_BUILD_TESTS)

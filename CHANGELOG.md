@@ -4,6 +4,33 @@ All notable changes to this project are documented here.  The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- AVX-512 / IFMA kernels for the merged radix-4 passes, `nat_asmNtt_zmm_radix4` and
+  `nat_asmINtt_zmm_radix4` (`src/mul_ntt_avx512.s`), one zmm per quarter of the 4D block.
+  They are bit-identical to the scalar kernels they replace and are selected by
+  `ntt_zmm_enable` (default on; off = scalar, which is also how the tree runs on a CPU
+  without AVX-512).  The finest level of the schedule peels its fixed distance-2 pair
+  (layers 2 and 1) into `ntt_level::tail`, which stays scalar, so every merged pass has
+  `D >= 8` and `D = 4` never occurs; the unpaired layer moves from layer 1 to the
+  distance-8 layer 3.  See `docs/avx512.md`.
+
+### Changed
+- Synced the schedule refactor from the scalar library (`sched-refactor`): the NTT layer
+  schedule is now one rule-based plan instead of three hard-coded nesting levels plus two
+  fallback schedules.  `ntt_sched_for(k)` returns up to four *levels* (`ntt_sched`,
+  `ntt_level`) — DRAM (the whole array) and the L3 / L2 / L1 working sets — cut by the
+  `inline constexpr` `ntt_scale_l1_threshold` / `_l2_` / `_l3_` constants, clamped to the array
+  size and de-duplicated per transform, so a small scale simply has fewer levels.  The
+  `ntt_sched_v3` A/B switch and the `ntt_sched_min_scale` boundary are gone, as are the plain
+  single-layer loop and the two-level schedule they selected: every scale now runs the same
+  code.  The runtime tunables `ntt_sched_la` / `ntt_sched_lb` and
+  `ntt_workspace::sched_levels()` are gone too; the cut points can still be scanned from the
+  command line (`-Dntt_scale_l2_threshold=14`).  Level boundaries are parity aligned, so the
+  only unpaired layer the schedule can leave is the bottom layer of the finest level's merged
+  range, always run at the minimum-distance end of both the forward and the inverse order.
+
 ## [4.0.0] - 2026-09-16
 
 First packaged release of the `nat` library.

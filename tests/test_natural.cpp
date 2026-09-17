@@ -14,6 +14,14 @@
 //	* the square (sqr / _sqr_base / _sqr_NTT) must agree with a * a;
 //	* the wrap-corrected "one size shorter" product must agree with ntt_wrap_enable
 //	  turned off, over the sawtooth band where the planner prefers it;
+//	* the NTT schedule plan must tile layers 2^(k-2)..2^1 exactly -- the merged ranges
+//	  plus the fixed distance-2 tail of the finest level -- leaving one unpaired layer,
+//	  the distance-8 layer 3, only when k is odd, and a product driven at an explicit
+//	  scale must equal the base case for every shape of the plan (DRAM alone .. all four
+//	  levels, even and odd scales);
+//	* the AVX-512 IFMA radix-4 kernels must be bit-identical to the scalar kernels they
+//	  replace (every D, both directions), and the whole engine with them on and off must
+//	  produce identical products and squares;
 //	* division must invert multiplication: (a/b)*b + a%b == a, (a*b)/b == a;
 //	* shifts, add/sub and hex/decimal round trips.
 //
@@ -187,6 +195,137 @@ static void t_sqr() {
 	done();
 }
 
+// Structural invariants of the schedule itself: the levels must tile the layers
+// 2^(k-2) .. 2^1 exactly once, in decreasing distance order, each level's top layer must
+// fit that level's chunk (a 2^T chunk holds layers j <= T-1).  This AVX-512 build peels the
+// fixed distance-2 pair (layers 2 and 1) off the finest level into lv.tail -- the zmm
+// kernels need D >= 8, and D = 4 must not occur -- so the merged ranges tile 3 .. k-2 and
+// the single unpaired layer, only ever present when k is odd, is the distance-8 layer 3.
+static void t_sched_plan() {
+	group("schedule plan (ntt_sched_for)");
+	// The tail is part of the design at the shipping cut points; a scan point small enough to
+	// crowd the levels near layer 1 can push the pair (2,1) into a coarser level, where the
+	// D >= 8 dispatch sends it to the scalar kernel instead -- correct, just not vectorised.
+	const bool default_cuts = ntt_scale_l1_threshold == 12 && ntt_scale_l2_threshold == 16 &&
+		ntt_scale_l3_threshold == 20;
+	for (int k = 2; k <= 24; k++) {
+		const ntt_sched S = ntt_sched_for(k);
+		bool chunk_ok = S.nlevel >= 1 && S.nlevel <= ntt_sched::MAXLEVEL && S.chunk[0] == k;
+		bool fits = true, tiling = true, shape = true, lone_ok = true, tail_ok = true;
+		int layers = 0, lones = 0, last = 0;
+		for (int i = 0; i < S.nlevel; i++)
+			if (S.lv[i].hi >= S.lv[i].lo || S.lv[i].tail) last = i;   // last non-empty level
+		for (int i = 0; i < S.nlevel; i++)
+			if (k >= 4 && S.chunk[i] < 4) chunk_ok = false;   // tail block + the layer-3 lone
+		for (int i = 0; i < S.nlevel; i++) {
+			const ntt_level& lv = S.lv[i];
+			if (i) {
+				if (S.chunk[i - 1] <= S.chunk[i]) chunk_ok = false;
+				if (S.lv[i - 1].lo != lv.hi + 1) tiling = false;
+			}
+			if (lv.tail && (i + 1 != S.nlevel || lv.lo != 3)) tail_ok = false;
+			if (lv.tail) layers += 2;                     // the pair (2, 1)
+			const int count = lv.hi - lv.lo + 1;
+			if (count <= 0)
+				continue;
+			if (lv.hi > S.chunk[i] - 1) fits = false;
+			if (lv.pairs != count / 2 || lv.lone != ((count & 1) != 0)) shape = false;
+			if (lv.lone && (lv.lo != (lv.tail ? 3 : 1) || i != last)) lone_ok = false;
+			if (lv.lone) lones++;
+			layers += count;
+		}
+		if (default_cuts && k >= 4 && !S.lv[S.nlevel - 1].tail) tail_ok = false;   // hi >= 2 there
+		if (!S.lv[S.nlevel - 1].tail && S.lv[S.nlevel - 1].lo != 1) tail_ok = false;
+		check(chunk_ok, "chunks: k first, then strictly decreasing, >= 4 when k >= 4");
+		check(fits, "every level layer fits that level's chunk (j <= T-1)");
+		check(tiling, "merged ranges tile the layers without a gap");
+		check(shape, "pairs / lone match the layer count of the level");
+		check(tail_ok, "only the finest level owns the tail, and it starts at layer 3");
+		check(layers == k - 2, "every scheduled layer is covered exactly once");
+		check(lone_ok && lones == ((k & 1) ? 1 : 0),
+			"one unpaired layer iff k is odd, at the bottom of the finest merged range");
+	}
+	done();
+}
+
+// End to end across the whole schedule: the product of two operands, driven through
+// ntt()/intt() at an explicit scale, must equal the Toom-22 base case.  The operands stay
+// small enough for the base case to be cheap while the explicit scale sweeps the shapes of
+// the plan -- DRAM alone at small scales, DRAM+L3+L2+L1 at the largest ones -- including
+// the odd scales, where the distance-2 layer is left unpaired.
+static void t_sched_scales() {
+	group("schedule: product vs base at explicit scales");
+	for (int k = 10; k <= 22; k++) {
+		const uint64_t n = 300, m = 200;
+		natural a = rnat(n), b = rnat(m), p, q;
+		p._mul_base(&a, &b);
+		ntt_workspace na(a, k), nb(b, k);
+		na.ntt();
+		nb.ntt();
+		na.mul(na, nb);
+		na.intt();
+		na.save(q, n + m);
+		check(q == p, "explicit-scale product == Toom-22");
+	}
+	done();
+}
+
+// The AVX-512 kernels must be bit-identical to the scalar kernels they replace: same two
+// merged layers, same twiddle cursors, same lazy representatives.  One pass at a time, both
+// directions, every D the engine can use at this scale, all three moduli.
+static void t_zmm_kernels() {
+	group("avx512: zmm radix-4 == scalar radix-4");
+	const int scale = 16;
+	const uint64_t size = 1ull << scale;
+	ntt_workspace w(rnat(size >> 1), scale);
+	std::vector<std::vector<uint64_t>> orig(3);
+	for (int i = 0; i < 3; i++)
+		orig[i].assign(w.ntt_data[i].data, w.ntt_data[i].data + size);
+	std::vector<uint64_t> ref(size);
+	for (int k = 3; k + 2 <= scale; k++) {
+		const uint64_t D = 1ull << k;
+		bool fwd_ok = true, inv_ok = true;
+		for (int i = 0; i < 3; i++) {
+			const uint64_t M = ntt_workspace::mods[i];
+			uint64_t* data = w.ntt_data[i].data;
+			uint64_t* end = data + size;
+			memcpy(data, orig[i].data(), size * 8);
+			nat_asmNtt2_radix4(D, M, data, ntt_workspace::root[i].data, ntt_workspace::root[i].data, end);
+			memcpy(ref.data(), data, size * 8);
+			memcpy(data, orig[i].data(), size * 8);
+			nat_asmNtt_zmm_radix4(D, M, data, ntt_workspace::root[i].data, ntt_workspace::root[i].data, end);
+			if (memcmp(ref.data(), data, size * 8)) fwd_ok = false;
+			memcpy(data, orig[i].data(), size * 8);
+			nat_asmINtt2_radix4(D, M, data, ntt_workspace::iroot[i].data, ntt_workspace::iroot[i].data, end);
+			memcpy(ref.data(), data, size * 8);
+			memcpy(data, orig[i].data(), size * 8);
+			nat_asmINtt_zmm_radix4(D, M, data, ntt_workspace::iroot[i].data, ntt_workspace::iroot[i].data, end);
+			if (memcmp(ref.data(), data, size * 8)) inv_ok = false;
+		}
+		check(fwd_ok, "forward zmm pass == scalar pass (bit for bit)");
+		check(inv_ok, "inverse zmm pass == scalar pass (bit for bit)");
+	}
+	done();
+}
+
+// End to end: with the zmm kernels on and off the whole engine must produce identical
+// results.  This is what covers the non-zero-base chunks, the level walk and the scalar
+// tail, none of which the single-pass check above reaches.
+static void t_zmm_paths() {
+	group("avx512: zmm engine vs scalar engine");
+	for (uint64_t n : { 896ull, 1000ull, 2048ull, 4096ull, 9000ull, 20000ull, 70000ull }) {
+		natural a = rnat(n), b = rnat(n);
+		ntt_zmm_enable = true;
+		natural p = a * b, q = sqr(a);
+		ntt_zmm_enable = false;
+		natural r = a * b, t = sqr(a);
+		ntt_zmm_enable = true;
+		check(p == r, "product identical with the zmm kernels on and off");
+		check(q == t, "square identical with the zmm kernels on and off");
+	}
+	done();
+}
+
 static void t_wrap() {
 	group("wrap-corrected path vs plain");
 	// shapes the planner picks wrap for: just above a power of two
@@ -247,6 +386,10 @@ int main() {
 	t_mul_reference();
 	t_mul_paths();
 	t_sqr();
+	t_sched_plan();
+	t_sched_scales();
+	t_zmm_kernels();
+	t_zmm_paths();
 	t_wrap();
 	t_div();
 	t_patterns();
