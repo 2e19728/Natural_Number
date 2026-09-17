@@ -51,6 +51,7 @@ extern "C" {
 	// iteration.  _D must be 2; it is kept as an argument so the call sites read like the
 	// other kernels.
 	void nat_asmNtt_zmm_radix4_d2(uint64_t _D, uint64_t _Mod, uint64_t* _Begin, const uint64_t* _RootO, const uint64_t* _RootI, uint64_t* _End);
+	void nat_asmINtt_zmm_radix4_d2(uint64_t _D, uint64_t _Mod, uint64_t* _Begin, const uint64_t* _RootO, const uint64_t* _RootI, uint64_t* _End);
 
 	// Fused last NTT layer x pointwise multiply x first INTT layer, for modulus _I
 	// (one generic function replacing the original asmNttMul0/1/2; see mul_ntt.s).
@@ -545,10 +546,11 @@ inline void ntt_inv_level(uint64_t* _Data, uint64_t _Base, uint64_t _Span, const
 	const uint64_t M = ntt_workspace::mods[_I];
 	uint64_t* B = _Data + _Base;
 	uint64_t* E = B + _Span;
-	if (lv.tail) {                                   // layers 1 then 2, the scalar tail
+	if (lv.tail) {                                   // layers 1 then 2, the packed d2 tail
 		const uint64_t* ro = R + (_Base >> 2);
 		const uint64_t* ri = R + (_Base >> 1);
-		if (_Base == 0) nat_asmINtt_radix4(2, M, B, ro, ri, E);
+		if (ntt_zmm_enable) nat_asmINtt_zmm_radix4_d2(2, M, B, ro, ri, E);
+		else if (_Base == 0) nat_asmINtt_radix4(2, M, B, ro, ri, E);
 		else nat_asmINtt2_radix4(2, M, B, ro, ri, E);
 	}
 	int j = lv.lo;

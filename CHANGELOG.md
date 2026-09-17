@@ -13,11 +13,17 @@ All notable changes to this project are documented here.  The format follows
   zmm per quarter of the 4D block, respectively per half of a 2N block.
   They are bit-identical to the scalar kernels they replace and are selected by
   `ntt_zmm_enable`, whose default is a runtime CPU check (AVX-512 F/BW/DQ/VL/IFMA), so a
-  machine -- or CI runner -- without the ISA silently runs the scalar path.  The finest level of the schedule peels its fixed distance-2 pair
-  (layers 2 and 1) into `ntt_level::tail`, which stays scalar, so every merged pass has
-  `D >= 8` and `D = 4` never occurs; the unpaired layer moves from layer 1 to the
-  distance-8 layer 3.  End to end this is 1.57x the scalar library at powers of two
-  896..4194304 limbs and 2.18x GNU MP at 2^22 limbs.  See `docs/avx512.md`.
+  machine -- or CI runner -- without the ISA silently runs the scalar path.
+- Packed kernels for the finest level's fixed distance-2 pair, `nat_asmNtt_zmm_radix4_d2` and
+  `nat_asmINtt_zmm_radix4_d2`, each running that pair's two layers in one 16-element
+  iteration (three `vpermt2q` regroupings in place of a quarter-sized zmm, and the twiddles
+  read straight out of the root tables).  The schedule peels the pair into
+  `ntt_level::tail`, so every merged pass has `D >= 8` and `D = 4` never occurs; the unpaired
+  layer moves from layer 1 to the distance-8 layer 3.  Both are bit-identical to the scalar
+  radix-4 kernel at `D = 2`, at every chunk size and offset (`tests/test_natural.cpp`).  End
+  to end the completed variant is 1.68x the scalar library on the product and 1.64x on the
+  square (powers of two, 896..4194304 limbs) and 2.29x / 2.32x GNU MP at 2^22 limbs.  See
+  `docs/avx512.md`.
 
 ### Changed
 - Synced the schedule refactor from the scalar library (`sched-refactor`): the NTT layer

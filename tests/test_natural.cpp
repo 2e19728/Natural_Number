@@ -347,6 +347,24 @@ static void t_zmm_kernels() {
 		}
 		check(ok, "D = 2 tail == scalar, every chunk size and offset");
 	}
+	for (int T = 4; T <= 9; T++) {                     // the same for the inverse tail
+		const uint64_t span = 1ull << T;
+		bool ok = true;
+		for (uint64_t base = 0; base + span <= size; base += span) {
+			for (int i = 0; i < 3; i++) {
+				const uint64_t M = ntt_workspace::mods[i];
+				const uint64_t* R = ntt_workspace::iroot[i].data;
+				uint64_t* data = w.ntt_data[i].data;
+				memcpy(data, orig[i].data(), size * 8);
+				nat_asmINtt2_radix4(2, M, data + base, R + (base >> 2), R + (base >> 1), data + base + span);
+				memcpy(ref.data(), data, size * 8);
+				memcpy(data, orig[i].data(), size * 8);
+				nat_asmINtt_zmm_radix4_d2(2, M, data + base, R + (base >> 2), R + (base >> 1), data + base + span);
+				if (memcmp(ref.data(), data, size * 8)) ok = false;
+			}
+		}
+		check(ok, "D = 2 inverse tail == scalar, every chunk size and offset");
+	}
 	done();
 }
 
