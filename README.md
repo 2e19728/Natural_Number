@@ -82,8 +82,9 @@ g++ -O3 -march=native -std=c++20 -masm=intel -Iinclude \
   Twiddle multiplication is Shoup's trick with a precomputed reciprocal; the three residues
   are recombined by `nat_asmCRT`.
 * **DRAM / L3 / L2 / L1 schedule.** The scheduled layers are run level by level, chunk-major,
-  one level per memory level: the whole array (DRAM), then `2^20`-element chunks (the 24 MiB
-  L3 working set of the three residues), `2^16` (L2) and `2^12` (L1). Each level merges two
+  one level per memory level: the whole array (DRAM), then `2^20`-element chunks (8 MiB, one
+  modulus at a time, under the 24 MiB L3), `2^16` (512 KiB, L2) and `2^12` (32 KiB, L1). Each
+  level merges two
   layers per pass (radix-4) with positionally computed twiddle cursors, and the cut points
   are clamped to the array size and de-duplicated per transform, so a small scale simply has
   fewer levels. Boundaries are parity aligned, so the only unpaired layer a level can leave is
