@@ -65,9 +65,9 @@ same layer, the forward and the inverse level runners remain mirror images of ea
 
 In this AVX-512 variant the merged passes run on IFMA zmm kernels, which need one zmm per
 quarter of the 4D block (`D >= 8`). The finest level therefore peels its fixed distance-2
-pair (layers 2 and 1) off the merged range into a scalar "tail", so the merged range starts
-at layer 3, `D = 4` never occurs, and the unpaired layer is the distance-8 layer 3. See
-[`avx512.md`](avx512.md).
+pair (layers 2 and 1) off the merged range into `ntt_level::tail`, which has its own packed
+kernel in both directions, so the merged range starts at layer 3, `D = 4` never occurs, and
+the unpaired layer is the distance-8 layer 3. See [`avx512.md`](avx512.md).
 
 The three "edge" passes of the transform are not paid for separately; they are fused into
 passes that already touch the data:
