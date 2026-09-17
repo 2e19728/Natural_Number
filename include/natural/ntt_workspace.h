@@ -327,8 +327,10 @@ inline void ntt_workspace::load(const array_u64& n, int scale) {
 // the layers that fit a chunk of 2^T limbs, i.e. every layer j <= T-1: layer j is block
 // diagonal with respect to 2^(j+1)-element blocks (fact (1)), so its blocks fit iff
 // 2^(j+1) <= 2^T.  DRAM is the whole array (a chunk of 2^k); L3/L2/L1 are the 2^20 / 2^16 /
-// 2^12-limb working sets of the three residues -- 24 MiB / 1.5 MiB / 96 KiB, the caches of
-// the reference CPU:
+// 2^12-limb working sets -- 8 MiB / 512 KiB / 32 KiB, because the three moduli are
+// transformed one after another (the modulus loop is outside the schedule), so only one
+// array is hot at a time.  They sit under the reference CPU's L3 (24 MiB), L2 (1.25 MiB)
+// and L1d (48 KiB):
 //
 //      DRAM: the whole array       pairs whose block fits in no smaller chunk
 //      L3:   2^l3-element chunks   (ntt_scale_l3_threshold)
@@ -376,8 +378,9 @@ inline void ntt_workspace::load(const array_u64& n, int scale) {
 
 // Cut points of the schedule, as chunk exponents: the transform is run at four levels --
 // DRAM (the whole array, no constant) and then the L3 / L2 / L1 working sets.  A level's
-// chunk holds 2^T limbs of each modulus, i.e. 3 * 2^T * 8 bytes resident, which for the
-// reference CPU gives T = 12 (96 KiB, L1d), 16 (1.5 MiB, L2) and 20 (24 MiB, L3).  Any set
+// chunk is 2^T limbs = 2^T * 8 bytes of resident data (one modulus at a time), which for the
+// reference CPU gives T = 12 (32 KiB, L1d 48 KiB), 16 (512 KiB, L2 1.25 MiB) and 20 (8 MiB,
+// L3 24 MiB).  Any set
 // with 4 <= l1 <= l2 <= l3 is correct (the values are clamped -- to 4 when k >= 4, because
 // the finest level has to host the scalar tail's 8-element block and the distance-8 layer 3
 // -- and de-duplicated per scale), so a cut-point scan can override them without editing

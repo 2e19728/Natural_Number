@@ -47,8 +47,9 @@ drive the schedule:
   table entry `base >> j`. There is no per-chunk renormalisation to compute.
 
 So the scheduled layers are run one level per memory level, coarse to fine: DRAM (the whole
-array), then the L3 / L2 / L1 working sets — `2^20`-element chunks (24 MiB for the three
-residues), `2^16` (1.5 MiB) and `2^12` (96 KiB). Each level merges two layers per pass
+array), then the L3 / L2 / L1 working sets — `2^20`-element chunks (8 MiB), `2^16` (512 KiB)
+and `2^12` (32 KiB), one modulus at a time under the 24 MiB L3 / 1.25 MiB L2 / 48 KiB L1d.
+Each level merges two layers per pass
 (radix-4) and derives its two table cursors from `base`, and inside a level the layers are run
 chunk-major — every layer of the level over one chunk before moving on — so the chunk stays
 resident across the whole level and the level streams the array once. The cut points are the
