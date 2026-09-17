@@ -8,13 +8,16 @@ All notable changes to this project are documented here.  The format follows
 
 ### Added
 - AVX-512 / IFMA kernels for the merged radix-4 passes, `nat_asmNtt_zmm_radix4` and
-  `nat_asmINtt_zmm_radix4` (`src/mul_ntt_avx512.s`), one zmm per quarter of the 4D block.
+  `nat_asmINtt_zmm_radix4`, plus single-layer `nat_asmNtt_zmm_radix2` /
+  `nat_asmINtt_zmm_radix2` for the schedule's unpaired pass (`src/mul_ntt_avx512.s`): one
+  zmm per quarter of the 4D block, respectively per half of a 2N block.
   They are bit-identical to the scalar kernels they replace and are selected by
   `ntt_zmm_enable` (default on; off = scalar, which is also how the tree runs on a CPU
   without AVX-512).  The finest level of the schedule peels its fixed distance-2 pair
   (layers 2 and 1) into `ntt_level::tail`, which stays scalar, so every merged pass has
   `D >= 8` and `D = 4` never occurs; the unpaired layer moves from layer 1 to the
-  distance-8 layer 3.  See `docs/avx512.md`.
+  distance-8 layer 3.  End to end this is 1.57x the scalar library at powers of two
+  896..4194304 limbs and 2.18x GNU MP at 2^22 limbs.  See `docs/avx512.md`.
 
 ### Changed
 - Synced the schedule refactor from the scalar library (`sched-refactor`): the NTT layer

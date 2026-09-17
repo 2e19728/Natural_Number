@@ -274,7 +274,7 @@ static void t_sched_scales() {
 // merged layers, same twiddle cursors, same lazy representatives.  One pass at a time, both
 // directions, every D the engine can use at this scale, all three moduli.
 static void t_zmm_kernels() {
-	group("avx512: zmm radix-4 == scalar radix-4");
+	group("avx512: zmm kernels == scalar kernels");
 	const int scale = 16;
 	const uint64_t size = 1ull << scale;
 	ntt_workspace w(rnat(size >> 1), scale);
@@ -302,8 +302,31 @@ static void t_zmm_kernels() {
 			nat_asmINtt_zmm_radix4(D, M, data, ntt_workspace::iroot[i].data, ntt_workspace::iroot[i].data, end);
 			if (memcmp(ref.data(), data, size * 8)) inv_ok = false;
 		}
-		check(fwd_ok, "forward zmm pass == scalar pass (bit for bit)");
-		check(inv_ok, "inverse zmm pass == scalar pass (bit for bit)");
+		check(fwd_ok, "forward zmm radix-4 pass == scalar (bit for bit)");
+		check(inv_ok, "inverse zmm radix-4 pass == scalar (bit for bit)");
+	}
+	for (int k = 3; k + 1 <= scale; k++) {              // single-layer kernels, N = 2^k
+		const uint64_t N = 1ull << k;
+		bool fwd_ok = true, inv_ok = true;
+		for (int i = 0; i < 3; i++) {
+			const uint64_t M = ntt_workspace::mods[i];
+			uint64_t* data = w.ntt_data[i].data;
+			uint64_t* end = data + size;
+			memcpy(data, orig[i].data(), size * 8);
+			nat_asmNtt2(N, M, data, ntt_workspace::root[i].data, end);
+			memcpy(ref.data(), data, size * 8);
+			memcpy(data, orig[i].data(), size * 8);
+			nat_asmNtt_zmm_radix2(N, M, data, ntt_workspace::root[i].data, end);
+			if (memcmp(ref.data(), data, size * 8)) fwd_ok = false;
+			memcpy(data, orig[i].data(), size * 8);
+			nat_asmINtt2(N, M, data, ntt_workspace::iroot[i].data, end);
+			memcpy(ref.data(), data, size * 8);
+			memcpy(data, orig[i].data(), size * 8);
+			nat_asmINtt_zmm_radix2(N, M, data, ntt_workspace::iroot[i].data, end);
+			if (memcmp(ref.data(), data, size * 8)) inv_ok = false;
+		}
+		check(fwd_ok, "forward zmm radix-2 pass == scalar (bit for bit)");
+		check(inv_ok, "inverse zmm radix-2 pass == scalar (bit for bit)");
 	}
 	done();
 }

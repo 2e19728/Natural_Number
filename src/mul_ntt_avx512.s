@@ -4,6 +4,10 @@
 #                               const uint64_t* RootO, const uint64_t* RootI, uint64_t* End);
 #   void nat_asmINtt_zmm_radix4(uint64_t D, uint64_t mod, uint64_t* Begin,
 #                               const uint64_t* RootO, const uint64_t* RootI, uint64_t* End);
+#   void nat_asmNtt_zmm_radix2 (uint64_t N, uint64_t mod, uint64_t* Begin,
+#                               const uint64_t* Root, uint64_t* End);
+#   void nat_asmINtt_zmm_radix2(uint64_t N, uint64_t mod, uint64_t* Begin,
+#                               const uint64_t* Root, uint64_t* End);
 #
 # Same signature, same two merged layers and the same twiddle cursors as the scalar
 # nat_asmNtt2_radix4 / nat_asmINtt2_radix4 (src/mul_ntt.s); one zmm per quarter of the 4D
@@ -230,5 +234,115 @@ nat_asmINtt_\P\()_radix4:
 
 	F4GEN	zmm, 64, 6
 	I4GEN	zmm, 64, 6
+
+
+# ---- forward single-layer pass (radix-2), distance N, one twiddle per 2N block ----
+#   Same layers and positional cursors as the scalar nat_asmNtt2: per 2N block with root
+#   pair (b, b'):
+#       z = S56(v, b);  lo = red(u) + z;  hi = red(u) + m - z
+#   One zmm per half of a block, so N must be a multiple of 8 -- which the schedule
+#   guarantees: its unpaired layer is the distance-8 one.
+#   Register map: R0 u, R1 v, R2 z, R3 lo, R4 hi, R16..R18 Shoup scratch,
+#                 R20..R22 w/w'/w'>>52, R28 m, R29 sign, R30 (m>>56)<<16
+	.macro F2GEN P, STEP, SHIFT
+	.globl	nat_asmNtt_\P\()_radix2
+nat_asmNtt_\P\()_radix2:
+	push	rbx
+	push	rbp
+	mov	rbp, r8				# End (5 arguments, not the radix-4 six)
+	lea	r11, [rdi*8]			# N*8: one half of a block
+	mov	rdi, rsi			# mod
+	mov	rbx, rcx			# Root
+	mov	r8,  rdx			# Begin
+	vpbroadcastq	\P\()28, rdi		# m
+	movabs	rax, 0x8000000000000000
+	vpbroadcastq	\P\()29, rax		# sign bit
+	mov	rax, rdi
+	shr	rax, 56
+	shl	rax, 16
+	vpbroadcastq	\P\()30, rax		# a<<16
+.Lfbk2_\P:
+	vpbroadcastq	\P\()20, [rbx]		# w
+	vpbroadcastq	\P\()21, [rbx+8]	# w'
+	vpsrlq		\P\()22, \P\()21, 52
+	mov	rcx, r11
+	shr	rcx, \SHIFT			# groups per half
+	lea	r9, [r8+r11]			# second half
+.Lfgrp2_\P:
+	vmovdqu64	\P\()0, [r8]		# u
+	vmovdqu64	\P\()1, [r9]		# v
+	S56 \P, \P\()2, \P\()1, \P\()20, \P\()21, \P\()22, \P\()16, \P\()17, \P\()18
+	RED \P, \P\()0
+	vpaddq		\P\()3, \P\()0, \P\()2	# lo
+	vpaddq		\P\()4, \P\()0, \P\()28
+	vpsubq		\P\()4, \P\()4, \P\()2	# hi
+	vmovdqu64	[r8], \P\()3
+	vmovdqu64	[r9], \P\()4
+	add	r8, \STEP
+	add	r9, \STEP
+	dec	rcx
+	jnz	.Lfgrp2_\P
+	add	r8, r11				# consume the second half
+	add	rbx, 16
+	cmp	r8, rbp
+	jb	.Lfbk2_\P
+	vzeroupper
+	pop	rbp
+	pop	rbx
+	ret
+	.endm
+
+# ---- inverse single-layer pass (radix-2), layers D then 2D ----
+#   Same as the scalar nat_asmINtt2:  s = u+v; lo = red(s); x = (u-v)+m; hi = S56(x, b).
+	.macro I2GEN P, STEP, SHIFT
+	.globl	nat_asmINtt_\P\()_radix2
+nat_asmINtt_\P\()_radix2:
+	push	rbx
+	push	rbp
+	mov	rbp, r8				# End (5 arguments, not the radix-4 six)
+	lea	r11, [rdi*8]
+	mov	rdi, rsi
+	mov	rbx, rcx
+	mov	r8,  rdx
+	vpbroadcastq	\P\()28, rdi
+	movabs	rax, 0x8000000000000000
+	vpbroadcastq	\P\()29, rax
+	mov	rax, rdi
+	shr	rax, 56
+	shl	rax, 16
+	vpbroadcastq	\P\()30, rax
+.Libk2_\P:
+	vpbroadcastq	\P\()20, [rbx]
+	vpbroadcastq	\P\()21, [rbx+8]
+	vpsrlq		\P\()22, \P\()21, 52
+	mov	rcx, r11
+	shr	rcx, \SHIFT
+	lea	r9, [r8+r11]
+.Ligrp2_\P:
+	vmovdqu64	\P\()0, [r8]		# u
+	vmovdqu64	\P\()1, [r9]		# v
+	vpaddq		\P\()2, \P\()0, \P\()1	# s
+	vpsubq		\P\()3, \P\()0, \P\()1	# u-v
+	vpaddq		\P\()3, \P\()3, \P\()28	# x
+	RED \P, \P\()2			# lo
+	S56 \P, \P\()4, \P\()3, \P\()20, \P\()21, \P\()22, \P\()16, \P\()17, \P\()18
+	vmovdqu64	[r8], \P\()2
+	vmovdqu64	[r9], \P\()4
+	add	r8, \STEP
+	add	r9, \STEP
+	dec	rcx
+	jnz	.Ligrp2_\P
+	add	r8, r11
+	add	rbx, 16
+	cmp	r8, rbp
+	jb	.Libk2_\P
+	vzeroupper
+	pop	rbp
+	pop	rbx
+	ret
+	.endm
+
+	F2GEN	zmm, 64, 6
+	I2GEN	zmm, 64, 6
 
 	.section	.note.GNU-stack,"",@progbits

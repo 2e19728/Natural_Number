@@ -39,6 +39,13 @@ extern "C" {
 
 	void nat_asmINtt_zmm_radix4(uint64_t _D, uint64_t _Mod, uint64_t* _Begin, const uint64_t* _RootO, const uint64_t* _RootI, uint64_t* _End);
 
+	// AVX-512 single-layer kernels for the schedule's unpaired layer (distance 2^j, one zmm
+	// per half of a 2N block, so N >= 8): same semantics and cursors as nat_asmNtt2 /
+	// nat_asmINtt2, and bit-identical to them.
+	void nat_asmNtt_zmm_radix2(uint64_t _N, uint64_t _Mod, uint64_t* _Begin, const uint64_t* _Root, uint64_t* _End);
+
+	void nat_asmINtt_zmm_radix2(uint64_t _N, uint64_t _Mod, uint64_t* _Begin, const uint64_t* _Root, uint64_t* _End);
+
 	// Fused last NTT layer x pointwise multiply x first INTT layer, for modulus _I
 	// (one generic function replacing the original asmNttMul0/1/2; see mul_ntt.s).
 	void nat_asmNttMul(uint64_t _N, uint64_t* _Dst, const uint64_t* _Src1, const uint64_t* _Src2, const uint64_t* _Root, uint64_t _I);
@@ -496,7 +503,8 @@ inline void ntt_fwd_level(uint64_t* _Data, uint64_t _Base, uint64_t _Span, const
 	if (lv.lone) {
 		const uint64_t d = 1ull << lv.lo;
 		const uint64_t* r = R + (_Base >> lv.lo);
-		if (_Base == 0) nat_asmNtt(d, M, B, r, E);
+		if (ntt_zmm_enable && d >= 8) nat_asmNtt_zmm_radix2(d, M, B, r, E);
+		else if (_Base == 0) nat_asmNtt(d, M, B, r, E);
 		else nat_asmNtt2(d, M, B, r, E);
 	}
 	if (lv.tail) {                                   // layers 2 then 1, the scalar tail
@@ -527,7 +535,8 @@ inline void ntt_inv_level(uint64_t* _Data, uint64_t _Base, uint64_t _Span, const
 	if (lv.lone) {
 		const uint64_t d = 1ull << j;
 		const uint64_t* r = R + (_Base >> j);
-		if (_Base == 0) nat_asmINtt(d, M, B, r, E);
+		if (ntt_zmm_enable && d >= 8) nat_asmINtt_zmm_radix2(d, M, B, r, E);
+		else if (_Base == 0) nat_asmINtt(d, M, B, r, E);
 		else nat_asmINtt2(d, M, B, r, E);
 		j++;
 	}
