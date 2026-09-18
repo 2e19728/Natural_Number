@@ -206,12 +206,14 @@ cmake/              package config for find_package(natural)
   more than it saves. The planner is shared, so this variant does not move which sizes those
   are, but it has not been measured on them — the A/B above covers powers of two plus 896
   limbs only.
-* Division uses a Newton iteration with a conservative accuracy heuristic, and it is not yet
-  trustworthy on every input. The inherited crash (a 137-limb divisor with a much longer
-  dividend) is fixed, but a divisor of exactly two limbs whose top limb is 1 -- `2^64` and
-  `2^64 + 1` are the smallest -- still makes `a / b` loop forever for most low limbs. The
-  reproducer and the traced loop state are at the top of `include/natural/natural.h`.
-  Multiplication, squaring and the NTT are unaffected.
+* Division uses a Newton iteration with a conservative accuracy heuristic. The shapes where
+  that heuristic degenerates -- a short divisor, or a short quotient -- are now dispatched to
+  an exact multi-limb schoolbook division instead (`div_schoolbook_divisor_max` /
+  `div_schoolbook_quotient_max`), and the iterative path keeps a bounded fallback as a safety
+  net, so the one-call hang this used to have (`(2^192-1) / (2^64+1)`) is gone. Replacing the
+  heuristic itself remains the standing recommendation; the history and the measurements are
+  at the top of `include/natural/natural.h`. Multiplication, squaring and the NTT are
+  unaffected.
 * The headers use inline assembly, which is why `-masm=intel` is a public requirement;
   moving those few routines into the assembly files would remove it.
 
