@@ -44,8 +44,25 @@
 //   * the 2-argument overload (used by calc_dec_base) instead clamps the accuracy estimate
 //     to the accuracy already reached and keeps the composition in range, and it skips a
 //     zero-length add (version_1's limb adder requires len2 >= 1).
-// A rigorous replacement is still the recommendation: Newton with an exact error term per
-// step, or a different division strategy.
+//   * STILL OPEN -- a divisor that is two limbs with a top limb of 1 (b in [2^64, 2^65)) is
+//     left unnormalized by div_iterative's n_shl = (countl_zero(top) + 1) & 63, which is 0
+//     for that top limb.  reciprocal() then has a single Newton iteration to run and starts
+//     it from a zero estimate, so the estimate comes back degenerate (size 1), the quotient
+//     limb is 0 on every pass, and div_iterative spins forever.  Deterministic, one call:
+//         natural a; a.resize(3); a[0] = a[1] = a[2] = ~0ull;   // 2^192 - 1
+//         natural b; b.resize(2); b[0] = 1; b[1] = 1;          // 2^64 + 1
+//         a / b;                                              // never returns
+//     Whether a given low limb hangs depends on it -- measured hanging: 0, 1, 2, 3,
+//     0x123456789abcdef0, 0xfffffffffffffffd; measured completing: 0x8000000000000000,
+//     0xfffffffffffffffe, 0xffffffffffffffff -- so treat the whole family as at risk rather
+//     than looking for a single boundary.  Traced state on every hanging pass: b.size = 2,
+//     n_shl = 0, rec.size = 1, idx = 2, r.size = 4 (7M+ identical iterations; -O2 and -O3
+//     alike).  The final "while (r >= b) { q += 1; r -= b; }" cleanup is not the culprit --
+//     the main loop is.  Found by verify/divverify.cpp, whose "power-of-two shapes" section
+//     is this family; the test suite misses it because a random divisor almost never has a
+//     top limb of 1.
+// The rigorous replacement is therefore not just the recommendation any more: Newton with an
+// exact error term per step, or a different division strategy, is what the above needs.
 //
 // Two consequences worth knowing:
 //   * squaring: the base case now has its own kernel (mul_basecase.s's nat_sqr_basecase, which
