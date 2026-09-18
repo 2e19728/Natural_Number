@@ -44,25 +44,26 @@
 //   * the 2-argument overload (used by calc_dec_base) instead clamps the accuracy estimate
 //     to the accuracy already reached and keeps the composition in range, and it skips a
 //     zero-length add (version_1's limb adder requires len2 >= 1).
-//   * STILL OPEN -- a divisor that is two limbs with a top limb of 1 (b in [2^64, 2^65)) is
-//     left unnormalized by div_iterative's n_shl = (countl_zero(top) + 1) & 63, which is 0
-//     for that top limb.  reciprocal() then has a single Newton iteration to run and starts
-//     it from a zero estimate, so the estimate comes back degenerate (size 1), the quotient
-//     limb is 0 on every pass, and div_iterative spins forever.  Deterministic, one call:
+//   * FIXED by the schoolbook dispatch below (see div_schoolbook_divisor_max): a divisor that
+//     is two limbs with a top limb of 1 (b in [2^64, 2^65)) is left unnormalized by
+//     div_iterative's n_shl = (countl_zero(top) + 1) & 63, which is 0 for that top limb.
+//     reciprocal() then has a single Newton iteration to run and starts it from a zero
+//     estimate, so the estimate came back degenerate (size 1), the quotient limb was 0 on
+//     every pass, and div_iterative spun forever.  The reproducer, kept as a regression case:
 //         natural a; a.resize(3); a[0] = a[1] = a[2] = ~0ull;   // 2^192 - 1
 //         natural b; b.resize(2); b[0] = 1; b[1] = 1;          // 2^64 + 1
-//         a / b;                                              // never returns
-//     Whether a given low limb hangs depends on it -- measured hanging: 0, 1, 2, 3,
-//     0x123456789abcdef0, 0xfffffffffffffffd; measured completing: 0x8000000000000000,
-//     0xfffffffffffffffe, 0xffffffffffffffff -- so treat the whole family as at risk rather
-//     than looking for a single boundary.  Traced state on every hanging pass: b.size = 2,
-//     n_shl = 0, rec.size = 1, idx = 2, r.size = 4 (7M+ identical iterations; -O2 and -O3
-//     alike).  The final "while (r >= b) { q += 1; r -= b; }" cleanup is not the culprit --
-//     the main loop is.  Found by verify/divverify.cpp, whose "power-of-two shapes" section
-//     is this family; the test suite misses it because a random divisor almost never has a
-//     top limb of 1.
-// The rigorous replacement is therefore not just the recommendation any more: Newton with an
-// exact error term per step, or a different division strategy, is what the above needs.
+//         a / b;                    // used to spin; now schoolbook, q = 2^128 - 2^64, r = 2^64-1
+//     Which low limbs hung was data-dependent (0, 1, 2, 3, 0x1234...f0, 0xFFFF...FD hung;
+//     0x8000...0, 0xFFFF...FE, 0xFFFF...FF completed), so the whole family was treated as at
+//     risk rather than one boundary.  Traced state on every hanging pass: b.size = 2,
+//     n_shl = 0, rec.size = 1, idx = 2, r.size = 4 (7M+ identical iterations).  Found by
+//     verify/divverify.cpp, whose "power-of-two shapes" section is this family.
+//   * The same shape at five limbs and above was swept with the abort() marker that found the
+//     above (8144 cases: 2^(64k)+1 for k = 5..400, top-limb-1 divisors with a second limb of
+//     0/1/2, all-ones, sparse) and never degenerated, so the repair is the dispatch plus a
+//     bounded fallback inside div_iterative, not a rewrite of the heuristic.
+// A rigorous replacement of the bookkeeping is still the standing recommendation: Newton with
+// an exact error term per step, or a different division strategy.
 //
 // Two consequences worth knowing:
 //   * squaring: the base case now has its own kernel (mul_basecase.s's nat_sqr_basecase, which
@@ -122,6 +123,28 @@ namespace nat {
 inline constexpr uint64_t mul_ntt_threshold = 896;
 inline constexpr uint64_t div_ntt_threshold = 512;
 inline constexpr int mul_ntt_scale_threshold = 10;
+
+//	Division dispatch: a shape this small goes to the schoolbook (Knuth D) path instead of
+//	the Newton/iterative one.  Both bounds are limb counts and either one is enough to
+//	qualify (a short divisor makes the reciprocal's setup the dominant cost; a short quotient
+//	makes the iteration count trivial while that setup is still paid for).
+//
+//	Correctness is the reason the dispatch exists at all: a divisor whose top limb is 1 is
+//	left unnormalized, and a *two-limb* one then gives reciprocal() a single Newton iteration
+//	starting from a zero estimate, which comes back degenerate -- the quotient limb stays 0
+//	and div_iterative never reduces r.  64 is a 32x margin over that shape.
+//
+//	Performance is why the bounds are this large rather than 2.  Measured with
+//	verify/divschool.cpp (same process, alternating, min of 5 rounds, random digits, one
+//	division per call) over a (divisor limbs x quotient limbs) grid: every cell with
+//	divisor <= 256 and quotient <= 256
+//	is at or below 1.00 (0.48-0.95 typical), the first clear losses appear at divisor 768
+//	(1.16-1.63), and a short quotient keeps schoolbook competitive even at divisor 1024
+//	(quotient 96: 0.79).  The iterative path pays for a fresh reciprocal per call, which is
+//	what makes a schoolbook pass cheaper for so long; 64 sits well inside the winning region
+//	without depending on the noisy part of the boundary.
+inline constexpr uint64_t div_schoolbook_divisor_max = 64;
+inline constexpr uint64_t div_schoolbook_quotient_max = 64;
 
 //	floor((_High : _Low) / _Mod) with the remainder written to *_Rem: the old asmDivMod.
 //	The rebuilt barrett_reduction.h only provides the quotient-only div_128_64, so the
@@ -717,6 +740,84 @@ inline uint64_t div_base(const natural& a, uint64_t b, natural& q) {
 	return r;
 }
 
+//	Multi-limb long division (Knuth's algorithm D): q = a / b, returns a % b.  Used for the
+//	shapes below the dispatch bounds and, unlike div_iterative(), it has no heuristic in it --
+//	every step is an exact estimate plus the standard corrections, so it either returns the
+//	right answer or does not return at all.
+//
+//	Preconditions: a >= b, b.size >= 2 (the caller has already handled b.size == 1 and a < b).
+inline natural divmod_schoolbook(const natural& a, const natural& b, natural& q) {
+	const uint64_t n = a.size, m = b.size;
+	const uint64_t s = std::countl_zero(b[m - 1]);      // normalise: top bit of v[m-1] set
+
+	natural v = b << s;
+	natural u = a << s;                                 // n or n+1 limbs
+	if (u.size < n + 1) {
+		u.resize(n + 1);                                // resize() does not zero-fill
+		u[n] = 0;
+	}
+	q.resize(n - m + 1);
+
+	for (uint64_t j = n - m + 1; j-- > 0; ) {
+		//	qhat = (u[j+m] : u[j+m-1]) / v[m-1].  The invariant is u[j+m] <= v[m-1]; at
+		//	equality the true quotient does not fit in a limb (x86's div would trap), so the
+		//	estimate is clamped and rhat is carried in 128 bits -- the correction below then
+		//	still distinguishes "too large" from "rhat already past 2^64".  The other branch
+		//	can use divmod_128_64 because it requires High < Mod.
+		uint64_t qhat;
+		unsigned __int128 rhat;
+		if (u[j + m] == v[m - 1]) {
+			qhat = ~0ull;
+			rhat = (unsigned __int128)u[j + m - 1] + v[m - 1];
+		} else {
+			uint64_t r64 = 0;
+			qhat = divmod_128_64(u[j + m - 1], u[j + m], v[m - 1], &r64);
+			rhat = r64;
+		}
+		//	Knuth's correction (D3): qhat may be one or two too large.  Once rhat reaches
+		//	2^64 the test can no longer fail, which is what bounds the loop -- and it leaves
+		//	the estimate at most one too large, so the multiply-subtract needs one add-back.
+		while (rhat < ((unsigned __int128)1 << 64) &&
+		       (unsigned __int128)qhat * v[m - 2] > (rhat << 64) + u[j + m - 2]) {
+			qhat -= 1;
+			rhat += v[m - 1];
+		}
+		//	u[j .. j+m] -= qhat * v[0 .. m-1], with the product formed on the fly.
+		uint64_t carry = 0;
+		uint64_t borrow = 0;
+		for (uint64_t i = 0; i < m; i++) {
+			unsigned __int128 p = (unsigned __int128)v[i] * qhat + carry;
+			carry = (uint64_t)(p >> 64);
+			unsigned __int128 t = (unsigned __int128)u[j + i] - (uint64_t)p - borrow;
+			u[j + i] = (uint64_t)t;
+			borrow = (uint64_t)((t >> 64) & 1);
+		}
+		unsigned __int128 t = (unsigned __int128)u[j + m] - carry - borrow;
+		u[j + m] = (uint64_t)t;
+		if (t >> 64) {                                  // qhat was one too large: add it back
+			qhat -= 1;
+			carry = 0;
+			for (uint64_t i = 0; i < m; i++) {
+				unsigned __int128 t2 = (unsigned __int128)u[j + i] + v[i] + carry;
+				u[j + i] = (uint64_t)t2;
+				carry = (uint64_t)(t2 >> 64);
+			}
+			u[j + m] = (uint64_t)((unsigned __int128)u[j + m] + carry);
+		}
+		q[j] = qhat;
+	}
+	q.std();
+
+	natural r;
+	r.resize(m);
+	for (uint64_t i = 0; i < m; i++)
+		r[i] = u[i];
+	r.std();
+	if (s)
+		r >>= s;
+	return r;
+}
+
 //	divs[divs.size - 1] == 1;
 inline natural reciprocal(const natural& divs, uint64_t divd_size) {
 	uint64_t expected_acc = divd_size + 1 - divs.size;
@@ -876,6 +977,17 @@ inline void div_iterative(const natural& divd, const natural& divs, natural& q, 
 
 		first = 0;
 		tmp >>= rec.size << 6;
+		//	The quotient limb estimate has degenerated (the accuracy heuristic came back
+		//	unusable, which is what makes this loop spin: the limb stays 0 and r never
+		//	shrinks).  The dispatch above keeps the shapes where that is known to happen away
+		//	from here, so this is the belt-and-braces path -- finish with the exact one.
+		if (tmp == 0) {
+			natural qq;
+			natural rr = divmod_schoolbook(divd, divs, qq);
+			q = std::move(qq);
+			r = std::move(rr);
+			return;
+		}
 		add(q.data + idx, q.data + idx, tmp.data, q.size - idx, tmp.size);
 
 		mul_load_NTT_info(tmp, b, tmp, ni_b);
@@ -923,6 +1035,11 @@ inline natural& natural::_div(const natural* ap, const natural* bp, natural* r) 
 	}
 	if (bp->size == 1) {
 		*r = div_base(*ap, (*bp)[0], *this);
+		return *this;
+	}
+	if (bp->size <= div_schoolbook_divisor_max ||
+	    ap->size - bp->size + 1 <= div_schoolbook_quotient_max) {
+		*r = divmod_schoolbook(*ap, *bp, *this);
 		return *this;
 	}
 	div_iterative(*ap, *bp, *this, *r);
