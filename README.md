@@ -28,9 +28,7 @@ two from 896 to 4 194 304 limbs:
 The scalar tree measures 1.46x / 1.47x against GNU MP at 2^22 limbs, i.e. all of the gain is
 the transform kernels. The measurement protocol, the kernel-by-kernel story, the verification
 and the four optimisations that were *measured and rejected* are in
-[`docs/avx512.md`](docs/avx512.md); the long-form write-ups are `report/framework.md`
-(plain language) and `report/implementation.md` (technical), both in Chinese, mirroring the
-scalar tree's `report/`.
+[`docs/avx512.md`](docs/avx512.md).
 
 ## Requirements
 
@@ -192,7 +190,6 @@ tests/              self-checking test suite (CTest)
 benchmarks/         throughput benchmark
 examples/           minimal usage example
 docs/               design and measurement notes (avx512.md is the variant's own)
-report/             long-form write-up (framework.md, implementation.md; Chinese)
 cmake/              package config for find_package(natural)
 ```
 
