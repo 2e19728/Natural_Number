@@ -18,7 +18,10 @@
 //	  distance-2 layer only when k is odd), and a product driven at an explicit scale
 //	  must equal the base case for every shape of the plan (DRAM alone .. all four
 //	  levels, even and odd scales);
-//	* division must invert multiplication: (a/b)*b + a%b == a, (a*b)/b == a;
+//	* division must invert multiplication: (a/b)*b + a%b == a, (a*b)/b == a, and the
+//	  division regression group pins the short-divisor / short-quotient cases (the old
+//	  reciprocal() spin's reproducer, the whole measured family, both dispatch boundaries
+//	  and the schoolbook divider's add-back branch);
 //	* shifts, add/sub and hex/decimal round trips.
 //
 // Build: see compile.sh (g++ -masm=intel -march=native -std=c++20 -O3 mul_basecase.s
@@ -290,6 +293,93 @@ static void t_div() {
 	done();
 }
 
+//	Regression cases for the reciprocal()/div_iterative defect that used to spin forever: a
+//	two-limb divisor whose top limb is 1 is left unnormalized, gets a single Newton iteration
+//	from a zero estimate, and the quotient limb then stayed 0, so the main loop never reduced
+//	r (see the KNOWN-ISSUE notes at the top of natural.h).  The schoolbook dispatch is what
+//	keeps those shapes away from the iterative path; these cases pin the old one-call
+//	reproducer, the whole measured family, the dispatch boundaries, and the add-back branch of
+//	the schoolbook divider.
+static void t_div_regression() {
+	group("division regression");
+	auto two_limb = [](uint64_t low, uint64_t top) {
+		natural b;
+		b.resize(2);
+		b[0] = low;
+		b[1] = top;
+		return b;
+	};
+	auto ident = [](const natural& a, const natural& b, const char* what) {
+		natural q = a / b, r = a % b;
+		check(q * b + r == a, what);
+		check(r < b, what);
+	};
+
+	//	the original one-call reproducer: used to return nothing at all
+	{
+		natural a;
+		a.resize(3);
+		a[0] = a[1] = a[2] = ~0ull;                          // 2^192 - 1
+		ident(a, two_limb(1, 1), "the (2^192-1)/(2^64+1) reproducer");
+	}
+
+	//	every low limb that was measured, hanging and completing alike, from the failing shape
+	//	out past the schoolbook bound
+	const uint64_t lows[] = { 0, 1, 2, 3, 0x123456789abcdef0ull, 0x8000000000000000ull,
+	                          0xfffffffffffffffdull, 0xfffffffffffffffeull, 0xffffffffffffffffull };
+	for (uint64_t low : lows) {
+		natural b = two_limb(low, 1);
+		for (uint64_t n : { 3ull, 4ull, 5ull, 8ull, 64ull, 65ull, 130ull, 300ull }) {
+			natural a = rnat(n);
+			if (a < b)
+				continue;
+			ident(a, b, "two-limb divisor with a top limb of 1");
+		}
+	}
+
+	//	the same shape at larger sizes (2^(64k)+1): these go through div_iterative, which never
+	//	degenerated on them, with the all-ones dividend that exposed the shape in the first place
+	for (uint64_t k : { 5ull, 6ull, 7ull, 16ull, 64ull, 200ull }) {
+		natural b;
+		b.resize(k + 1);
+		for (uint64_t i = 0; i <= k; i++)
+			b[i] = 0;
+		b[0] = 1;
+		b[k] = 1;
+		natural a = rnat(k + 1 + 300, 1);
+		ident(a, b, "2^(64k)+1 with an all-ones dividend");
+	}
+
+	//	both dispatch boundaries, crossed in both directions
+	for (uint64_t m : { 2ull, 3ull, 63ull, 64ull, 65ull, 66ull }) {
+		for (uint64_t qn : { 1ull, 2ull, 63ull, 64ull, 65ull, 66ull }) {
+			natural b = rnat(m);
+			natural a = rnat(m + qn - 1);
+			ident(a, b, "schoolbook / iterative boundary");
+		}
+	}
+
+	//	one deterministic input that takes the schoolbook add-back branch (qhat came out one too
+	//	large): 2^129 / (2^128 + 1) = 1 remainder 2^128 - 1
+	{
+		natural a;
+		a.resize(3);
+		a[0] = 0;
+		a[1] = 0;
+		a[2] = 2;                                            // 2^129
+		natural b;
+		b.resize(3);
+		b[0] = 1;
+		b[1] = 0;
+		b[2] = 1;                                            // 2^128 + 1
+		natural q = a / b, r = a % b;
+		check(q == natural(1), "add-back branch: quotient");
+		check(r == (natural(1) << 128) - 1, "add-back branch: remainder");
+		check(q * b + r == a, "add-back branch: identity");
+	}
+	done();
+}
+
 static void t_patterns() {
 	group("carry stress patterns");
 	const uint64_t sizes[] = { 3, 4, 5, 8, 23, 24, 25, 37, 48, 64, 127, 128, 129, 256, 512, 1000 };
@@ -318,6 +408,7 @@ int main() {
 	t_sched_scales();
 	t_wrap();
 	t_div();
+	t_div_regression();
 	t_patterns();
 	std::printf("\n%d checks, %d failures\n", g_checks, g_fails);
 	std::printf("%s\n", g_fails ? "FAILED" : "ALL OK");

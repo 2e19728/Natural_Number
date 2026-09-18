@@ -20,6 +20,18 @@ All notable changes to this project are documented here.  The format follows
   only unpaired layer the schedule can leave is the distance-2 layer, always run at the
   minimum-distance end of both the forward and the inverse order.
 
+### Fixed
+- Division could spin forever on a two-limb divisor whose top limb is 1 (`(2^192-1)/(2^64+1)`
+  is the one-call reproducer).  Such a divisor is left unnormalized, so `reciprocal()` had a
+  single Newton iteration to run from a zero estimate; the quotient digit stayed 0 and
+  `div_iterative` never reduced the remainder.  Shapes of that kind -- a short divisor, or a
+  short quotient -- now go to an exact multi-limb schoolbook (Knuth D) division
+  (`div_schoolbook_divisor_max` / `div_schoolbook_quotient_max`, 64 limbs each, either one
+  qualifying), which is also faster than the iterative path below those bounds because it
+  never builds a reciprocal.  The iterative path keeps a bounded fallback for any other shape
+  whose estimate degenerates, and the `division regression` test group pins the reproducer,
+  the measured family, both dispatch boundaries and the schoolbook add-back branch.
+
 ## [4.0.0] - 2026-09-16
 
 First packaged release of the `nat` library.
