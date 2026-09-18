@@ -25,6 +25,14 @@ All notable changes to this project are documented here.  The format follows
   on the square (powers of two, 896..4194304 limbs) and 2.45-2.56x / 2.34-2.39x GNU MP at
   2^22 limbs.  See `docs/avx512.md`.
 
+### Fixed
+- Division could spin forever on a two-limb divisor whose top limb is 1 (`(2^192-1)/(2^64+1)`):
+  the shapes the Newton accuracy heuristic cannot be trusted on -- a short divisor, or a short
+  quotient -- now go to an exact multi-limb schoolbook (Knuth D) division, and the iterative
+  path keeps a bounded fallback.  Synced from the scalar tree; the `division regression` test
+  group covers the reproducer, the measured family, the dispatch boundaries and the
+  schoolbook add-back branch.  Suite 4090 checks (4014 with `ntt_zmm_cpu_ok()` forced false).
+
 ### Changed
 - Synced the schedule refactor from the scalar library (`sched-refactor`): the NTT layer
   schedule is now one rule-based plan instead of three hard-coded nesting levels plus two

@@ -177,9 +177,11 @@ inverting multiplication). On top of the scalar suite it adds, **per pass**: eve
 `D` and radix-2 `N` at every offset, and the two `D = 2` tail kernels at every chunk size
 `T = 4…9` at every offset — each **bit-identical** to the scalar kernel it replaces — plus an
 end-to-end check that the whole engine with the zmm kernels on and off produces identical
-products and squares. 3 857 checks, 0 failures with the ISA present; with `ntt_zmm_cpu_ok()`
-forced to false the zmm-only groups skip themselves and the suite still passes **3 781
-checks, 0 failures** on the scalar path. With the ISA present the suite runs in a few seconds.
+products and squares, and the division regression group (the short-divisor/short-quotient
+cases that used to spin). 4 090 checks, 0 failures with the ISA present; with
+`ntt_zmm_cpu_ok()` forced to false the zmm-only groups skip themselves and the suite still
+passes **4 014 checks, 0 failures** on the scalar path. With the ISA present the suite runs in
+a few seconds.
 
 ## Repository layout
 
